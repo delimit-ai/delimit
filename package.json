@@ -1,7 +1,7 @@
 {
   "name": "delimit",
-  "version": "2.0.0",
-  "description": "Dynamic AI governance with seamless mode switching - advisory, guarded, or enforce based on context",
+  "version": "2.1.0",
+  "description": "ESLint for API contracts — detect breaking changes, enforce semver, and generate migration guides for OpenAPI specs",
   "main": "index.js",
   "bin": {
     "delimit": "./bin/delimit-cli.js"
@@ -15,23 +15,28 @@
     "test": "echo 'Governance is context-aware' && exit 0"
   },
   "keywords": [
-    "governance",
-    "ai",
-    "security",
-    "compliance",
-    "git-hooks",
-    "development",
-    "dynamic",
-    "context-aware",
-    "claude",
-    "gemini",
-    "copilot",
+    "openapi",
+    "swagger",
+    "api",
+    "breaking-changes",
+    "semver",
+    "lint",
+    "linter",
+    "api-governance",
+    "api-contracts",
+    "ci-cd",
+    "github-actions",
+    "migration",
+    "diff",
+    "schema-validation",
+    "api-versioning",
+    "eslint",
     "delimit",
-    "mcp",
-    "model-context-protocol",
-    "troubleshooting"
+    "openapi-diff",
+    "api-linter",
+    "contract-testing"
   ],
-  "author": "Delimit Team",
+  "author": "Delimit AI <hello@delimit.ai>",
   "license": "MIT",
   "homepage": "https://delimit.ai",
   "repository": {
