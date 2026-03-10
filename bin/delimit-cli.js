@@ -522,9 +522,9 @@ program
         }
     });
 
-// Explain command - show decision reasoning
+// Explain-decision command - show governance decision reasoning
 program
-    .command('explain [decision-id]')
+    .command('explain-decision [decision-id]')
     .description('Explain a governance decision')
     .action(async (decisionId) => {
         await ensureAgent();
@@ -733,6 +733,189 @@ program
         
         // Action allowed
         process.exit(0);
+    });
+
+// ═══════════════════════════════════════════════════════════════════════
+//  V1 PUBLIC COMMANDS — API Contract Governance
+// ═══════════════════════════════════════════════════════════════════════
+
+const apiEngine = require('../lib/api-engine');
+
+// Init command — scaffold .delimit/ config
+program
+    .command('init')
+    .description('Initialize Delimit API governance in this project')
+    .action(async () => {
+        const configDir = path.join(process.cwd(), '.delimit');
+        const policyFile = path.join(configDir, 'policies.yml');
+
+        if (fs.existsSync(policyFile)) {
+            console.log(chalk.yellow('Already initialized — .delimit/policies.yml exists'));
+            return;
+        }
+
+        fs.mkdirSync(configDir, { recursive: true });
+
+        const template = `# Delimit API Governance Policy
+# https://github.com/delimit-ai/delimit
+
+# Override built-in rules (default: false)
+override_defaults: false
+
+rules: []
+# Example:
+#   - id: protect_v1
+#     name: Protect V1 API
+#     change_types: [endpoint_removed, method_removed, field_removed]
+#     severity: error
+#     action: forbid
+#     conditions:
+#       path_pattern: "^/v1/.*"
+#     message: "V1 API is frozen. Make changes in V2."
+`;
+        fs.writeFileSync(policyFile, template);
+        console.log(chalk.green('Created .delimit/policies.yml'));
+        console.log('');
+        console.log('Next steps:');
+        console.log(`  ${chalk.bold('delimit lint')} old.yaml new.yaml   — check for breaking changes`);
+        console.log(`  ${chalk.bold('delimit diff')} old.yaml new.yaml   — see all changes`);
+        console.log(`  ${chalk.bold('delimit explain')} old.yaml new.yaml — human-readable summary`);
+    });
+
+// Lint command — diff + policy (primary command)
+program
+    .command('lint <old_spec> <new_spec>')
+    .description('Lint API specs for breaking changes and policy violations')
+    .option('-p, --policy <file>', 'Custom policy file')
+    .option('--current-version <ver>', 'Current API version for semver bump')
+    .option('-n, --name <name>', 'API name for context')
+    .option('--json', 'Output raw JSON')
+    .action(async (oldSpec, newSpec, options) => {
+        try {
+            const result = apiEngine.lint(
+                path.resolve(oldSpec),
+                path.resolve(newSpec),
+                { policy: options.policy, version: options.currentVersion, name: options.name }
+            );
+
+            if (options.json) {
+                console.log(JSON.stringify(result, null, 2));
+                process.exit(result.exit_code || 0);
+                return;
+            }
+
+            // Decision banner
+            const decision = result.decision;
+            const semver = result.semver;
+            const banner = decision === 'fail'
+                ? chalk.red.bold('FAIL')
+                : decision === 'warn'
+                    ? chalk.yellow.bold('WARN')
+                    : chalk.green.bold('PASS');
+
+            const bump = semver ? ` — ${chalk.bold(semver.bump.toUpperCase())}` : '';
+            const nextVer = semver && semver.next_version ? ` (${semver.next_version})` : '';
+
+            console.log(`\n${banner}${bump}${nextVer}\n`);
+
+            // Summary
+            const s = result.summary;
+            console.log(`  Changes: ${s.total_changes} total, ${s.breaking_changes} breaking`);
+            if (s.violations > 0) {
+                console.log(`  Violations: ${s.errors} error(s), ${s.warnings} warning(s)`);
+            }
+            console.log('');
+
+            // Violations
+            const violations = result.violations || [];
+            if (violations.length > 0) {
+                violations.forEach(v => {
+                    const icon = v.severity === 'error' ? chalk.red('ERR') : chalk.yellow('WRN');
+                    console.log(`  ${icon}  ${v.message}`);
+                    if (v.path) console.log(`       ${chalk.gray(v.path)}`);
+                });
+                console.log('');
+            }
+
+            // Non-breaking changes
+            const safe = (result.all_changes || []).filter(c => !c.is_breaking);
+            if (safe.length > 0) {
+                console.log(chalk.green('  Additions:'));
+                safe.forEach(c => console.log(`    + ${c.message}`));
+                console.log('');
+            }
+
+            process.exit(result.exit_code || 0);
+        } catch (err) {
+            console.error(chalk.red(`Error: ${err.message}`));
+            process.exit(1);
+        }
+    });
+
+// Diff command — pure diff, no policy
+program
+    .command('diff <old_spec> <new_spec>')
+    .description('Show all changes between two API specs')
+    .option('--json', 'Output raw JSON')
+    .action(async (oldSpec, newSpec, options) => {
+        try {
+            const result = apiEngine.diff(
+                path.resolve(oldSpec),
+                path.resolve(newSpec)
+            );
+
+            if (options.json) {
+                console.log(JSON.stringify(result, null, 2));
+                return;
+            }
+
+            console.log(`\n  ${result.total_changes} change(s), ${result.breaking_changes} breaking\n`);
+
+            (result.changes || []).forEach(c => {
+                const tag = c.is_breaking ? chalk.red('[BREAKING]') : chalk.green('[safe]');
+                console.log(`  ${tag} ${c.message}`);
+            });
+            console.log('');
+        } catch (err) {
+            console.error(chalk.red(`Error: ${err.message}`));
+            process.exit(1);
+        }
+    });
+
+// Explain command — human-readable templates
+program
+    .command('explain <old_spec> <new_spec>')
+    .description('Generate human-readable API change explanation')
+    .option('-t, --template <name>', 'Template: developer, team_lead, product, migration, changelog, pr_comment, slack', 'developer')
+    .option('--old-version <ver>', 'Old version')
+    .option('--new-version <ver>', 'New version')
+    .option('-n, --name <name>', 'API name')
+    .option('--json', 'Output raw JSON')
+    .action(async (oldSpec, newSpec, options) => {
+        try {
+            const result = apiEngine.explain(
+                path.resolve(oldSpec),
+                path.resolve(newSpec),
+                {
+                    template: options.template,
+                    oldVersion: options.oldVersion,
+                    newVersion: options.newVersion,
+                    name: options.name,
+                }
+            );
+
+            if (options.json) {
+                console.log(JSON.stringify(result, null, 2));
+                return;
+            }
+
+            console.log('');
+            console.log(result.output);
+            console.log('');
+        } catch (err) {
+            console.error(chalk.red(`Error: ${err.message}`));
+            process.exit(1);
+        }
     });
 
 program.parse();
