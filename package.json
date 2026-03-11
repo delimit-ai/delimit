@@ -1,7 +1,7 @@
 {
   "name": "delimit-cli",
-  "version": "2.2.0",
-  "description": "ESLint for API contracts — detect breaking changes, enforce semver, and generate migration guides for OpenAPI specs",
+  "version": "2.3.0",
+  "description": "Prevent breaking API changes before they reach production. Deterministic diff engine + policy enforcement + semver classification.",
   "main": "index.js",
   "bin": {
     "delimit": "./bin/delimit-cli.js"
