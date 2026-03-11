@@ -882,14 +882,57 @@ program
 
         fs.mkdirSync(configDir, { recursive: true });
         fs.writeFileSync(policyFile, POLICY_PRESETS[preset]);
-        console.log(chalk.green(`Created .delimit/policies.yml (preset: ${preset})`));
-        console.log('');
-        console.log(`  ${chalk.bold('strict')}  — zero tolerance, all breaking changes are errors`);
-        console.log(`  ${chalk.bold('default')} — balanced, blocks destructive changes, warns on risky`);
-        console.log(`  ${chalk.bold('relaxed')} — warnings only, never blocks CI`);
-        console.log('');
-        console.log(`Switch preset: ${chalk.bold('delimit init --preset strict')}`);
-        console.log('');
+        console.log(chalk.green(`\n  Created .delimit/policies.yml (preset: ${preset})\n`));
+
+        // Auto-detect OpenAPI spec files
+        const specPatterns = [
+            'openapi.yaml', 'openapi.yml', 'openapi.json',
+            'swagger.yaml', 'swagger.yml', 'swagger.json',
+            'api.yaml', 'api.yml', 'api.json',
+            'docs/openapi.yaml', 'docs/openapi.yml', 'docs/openapi.json',
+            'spec/openapi.yaml', 'spec/openapi.json',
+            'specs/openapi.yaml', 'specs/openapi.json',
+            'api/openapi.yaml', 'api/openapi.json',
+            'contrib/openapi.json',
+        ];
+        const foundSpecs = specPatterns.filter(p => fs.existsSync(path.join(process.cwd(), p)));
+
+        if (foundSpecs.length > 0) {
+            const specPath = foundSpecs[0];
+            console.log(`  Detected spec: ${chalk.bold(specPath)}`);
+            console.log('');
+            console.log(chalk.bold('  Add this to .github/workflows/api-governance.yml:\n'));
+            console.log(chalk.gray(`  name: API Governance
+  on:
+    pull_request:
+      paths:
+        - '${specPath}'
+  permissions:
+    contents: read
+    pull-requests: write
+  jobs:
+    api-governance:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - uses: actions/checkout@v4
+          with:
+            ref: \${{ github.event.pull_request.base.sha }}
+            path: _base
+        - uses: delimit-ai/delimit@v1
+          with:
+            old_spec: _base/${specPath}
+            new_spec: ${specPath}
+            mode: advisory`));
+            console.log('');
+        } else {
+            console.log('  No OpenAPI spec file detected.');
+            console.log(`  Delimit also supports ${chalk.bold('Zero-Spec Mode')} — run ${chalk.bold('delimit lint')} in a FastAPI/NestJS/Express project.`);
+            console.log('');
+        }
+
+        console.log(`  ${chalk.bold('Presets')}: strict | default | relaxed`);
+        console.log(`  Switch: ${chalk.bold('delimit init --preset strict')}\n`);
         console.log('Next steps:');
         console.log(`  ${chalk.bold('delimit lint')} old.yaml new.yaml   — check for breaking changes`);
         console.log(`  ${chalk.bold('delimit diff')} old.yaml new.yaml   — see all changes`);
