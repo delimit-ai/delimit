@@ -803,7 +803,7 @@ program
             const specPath = foundSpecs[0];
             console.log(`  Detected spec: ${chalk.bold(specPath)}`);
             console.log('');
-            console.log(chalk.bold('  Add this to .github/workflows/api-governance.yml:\n'));
+            console.log(chalk.bold('  Workflow template:\n'));
             console.log(chalk.gray(`  name: API Governance
   on:
     pull_request:
@@ -827,6 +827,48 @@ program
             new_spec: ${specPath}
             mode: advisory`));
             console.log('');
+
+            // Auto-write the workflow file
+            const workflowDir = path.join(process.cwd(), '.github', 'workflows');
+            const workflowFile = path.join(workflowDir, 'api-governance.yml');
+
+            if (!fs.existsSync(workflowFile)) {
+                try {
+                    fs.mkdirSync(workflowDir, { recursive: true });
+                    const workflowContent = `name: API Governance
+on:
+  pull_request:
+    paths:
+      - '${specPath}'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  api-governance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: \${{ github.event.pull_request.base.sha }}
+          path: _base
+      - uses: delimit-ai/delimit@v1
+        with:
+          old_spec: _base/${specPath}
+          new_spec: ${specPath}
+          mode: advisory
+`;
+                    fs.writeFileSync(workflowFile, workflowContent);
+                    console.log(chalk.green(`  Created .github/workflows/api-governance.yml\n`));
+                } catch (err) {
+                    console.log(chalk.yellow(`  Could not write workflow file: ${err.message}`));
+                    console.log(chalk.bold('  Add this to .github/workflows/api-governance.yml manually (shown above)\n'));
+                }
+            } else {
+                console.log(chalk.yellow('  .github/workflows/api-governance.yml already exists — skipped\n'));
+            }
         } else {
             console.log('  No OpenAPI spec file detected.');
             console.log(`  Delimit also supports ${chalk.bold('Zero-Spec Mode')} — run ${chalk.bold('delimit lint')} in a FastAPI/NestJS/Express project.`);
