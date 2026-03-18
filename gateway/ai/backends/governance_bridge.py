@@ -145,7 +145,7 @@ def evaluate_trigger(action: str, context: Optional[Dict] = None, repo: str = ".
     return {
         "tool": "gov.evaluate",
         "status": "not_available",
-        "error": "Governance evaluation engine not running. This tool requires the governancegate package.",
+        "error": "Project not initialized for governance. Say 'initialize governance for this project' or run the delimit_init tool with your project path.",
         "action": action,
         "repo": repo,
     }
@@ -156,7 +156,7 @@ def new_task(title: str, scope: str, risk_level: str = "medium", repo: str = "."
     return {
         "tool": "gov.new_task",
         "status": "not_available",
-        "error": "Governance task engine not running. This tool requires the governancegate package.",
+        "error": "Project not initialized for governance. Say 'initialize governance for this project' or run the delimit_init tool with your project path.",
     }
 
 
@@ -165,7 +165,7 @@ def run_task(task_id: str, repo: str = ".") -> Dict[str, Any]:
     return {
         "tool": "gov.run",
         "status": "not_available",
-        "error": "Governance task engine not running. This tool requires the governancegate package.",
+        "error": "Project not initialized for governance. Say 'initialize governance for this project' or run the delimit_init tool with your project path.",
     }
 
 
@@ -174,7 +174,7 @@ def verify(task_id: str, repo: str = ".") -> Dict[str, Any]:
     return {
         "tool": "gov.verify",
         "status": "not_available",
-        "error": "Governance task engine not running. This tool requires the governancegate package.",
+        "error": "Project not initialized for governance. Say 'initialize governance for this project' or run the delimit_init tool with your project path.",
     }
 
 
@@ -183,7 +183,7 @@ def evidence_index(task_id: str, repo: str = ".") -> Dict[str, Any]:
     return {
         "tool": "gov.evidence_index",
         "status": "not_available",
-        "error": "Governance evidence engine not running. This tool requires the governancegate package.",
+        "error": "Project not initialized for governance. Say 'initialize governance for this project' or run the delimit_init tool with your project path.",
     }
 
 
@@ -192,5 +192,5 @@ def require_owner_approval(context: str, repo: str = ".") -> Dict[str, Any]:
     return {
         "tool": "gov.require_owner_approval",
         "status": "not_available",
-        "error": "Governance approval engine not running. This tool requires the governancegate package.",
+        "error": "Project not initialized for governance. Say 'initialize governance for this project' or run the delimit_init tool with your project path.",
     }
