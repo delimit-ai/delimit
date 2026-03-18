@@ -15,6 +15,12 @@ logger = logging.getLogger("delimit.ai.os_bridge")
 
 OS_PACKAGE = Path("/home/delimit/.delimit_suite/packages/delimit-os")
 
+_NOT_INIT_MSG = (
+    "Project not initialized for governance. "
+    "Say 'initialize governance for this project' "
+    "or run the delimit_init tool with your project path."
+)
+
 
 def _ensure_os_path():
     if str(OS_PACKAGE) not in sys.path:
@@ -47,7 +53,7 @@ def create_plan(operation: str, target: str, parameters: Optional[Dict] = None, 
         PLANS[plan_id] = plan
         return plan
     except ImportError:
-        return {"error": "delimit-os not available", "fallback": True}
+        return {"error": _NOT_INIT_MSG, "fallback": True}
 
 
 def get_status() -> Dict[str, Any]:
@@ -62,7 +68,7 @@ def get_status() -> Dict[str, Any]:
             "tokens": len(TOKENS),
         }
     except ImportError:
-        return {"status": "unavailable", "error": "delimit-os not loaded"}
+        return {"status": "unavailable", "error": _NOT_INIT_MSG}
 
 
 def check_gates(plan_id: str) -> Dict[str, Any]:
@@ -79,4 +85,4 @@ def check_gates(plan_id: str) -> Dict[str, Any]:
             "status": plan.get("status"),
         }
     except ImportError:
-        return {"error": "delimit-os not available"}
+        return {"error": _NOT_INIT_MSG}
