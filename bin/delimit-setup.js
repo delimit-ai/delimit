@@ -184,10 +184,14 @@ async function main() {
     }
 
     // Step 3d: Configure Gemini CLI (if installed)
-    const GEMINI_CONFIG = path.join(os.homedir(), '.gemini', 'settings.json');
-    if (fs.existsSync(GEMINI_CONFIG)) {
+    const GEMINI_DIR = path.join(os.homedir(), '.gemini');
+    const GEMINI_CONFIG = path.join(GEMINI_DIR, 'settings.json');
+    if (fs.existsSync(GEMINI_DIR)) {
         try {
-            let geminiConfig = JSON.parse(fs.readFileSync(GEMINI_CONFIG, 'utf-8'));
+            let geminiConfig = {};
+            if (fs.existsSync(GEMINI_CONFIG)) {
+                geminiConfig = JSON.parse(fs.readFileSync(GEMINI_CONFIG, 'utf-8'));
+            }
             if (!geminiConfig.mcpServers) geminiConfig.mcpServers = {};
             if (geminiConfig.mcpServers.delimit) {
                 log(`  ${green('✓')} Delimit already in Gemini CLI config`);
@@ -307,6 +311,13 @@ Run full governance compliance checks. Verify security, policy compliance, evide
     step(6, 'Done!');
     log('');
     log(`  ${green('Delimit is installed.')} Your AI now has persistent memory and governance.`);
+    log('');
+    log('  Configured for:');
+    const tools = ['Claude Code'];
+    if (fs.existsSync(CODEX_CONFIG)) tools.push('Codex');
+    if (fs.existsSync(path.join(os.homedir(), '.cursor'))) tools.push('Cursor');
+    if (fs.existsSync(GEMINI_DIR)) tools.push('Gemini CLI');
+    log(`  ${green('✓')} ${tools.join(', ')}`);
     log('');
     log('  Try it now:');
     log(`  ${bold('$ claude')}`);
