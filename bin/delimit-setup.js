@@ -104,7 +104,8 @@ async function main() {
     const arch = (() => { try { return execSync('uname -m', { encoding: 'utf-8' }).trim(); } catch { return 'x86_64'; } })();
     const osName = process.platform === 'darwin' ? 'macos' : 'linux';
     const artifact = `${osName}-${arch}-${pyVer}`;
-    const proVersion = '3.8.2';
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
+    const proVersion = pkg.proModuleVersion || '3.8.2';
     const proUrl = `https://delimit.ai/releases/v${proVersion}/delimit-pro-${artifact}.tar.gz`;
 
     try {
