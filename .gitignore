@@ -3,3 +3,4 @@ adapters/
 .env
 *.log
 .DS_Store
+.mcpregistry_*

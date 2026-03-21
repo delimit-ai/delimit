@@ -225,6 +225,11 @@ async function main() {
                 fs.writeFileSync(GEMINI_CONFIG, JSON.stringify(geminiConfig, null, 2));
                 log(`  ${green('✓')} Added delimit to Gemini CLI (${GEMINI_CONFIG})`);
             }
+            // Add governance instructions
+            if (!geminiConfig.customInstructions || !geminiConfig.customInstructions.includes('delimit_ledger_context')) {
+                geminiConfig.customInstructions = 'Delimit MCP is installed. On every session start, call delimit_ledger_context to check for open tasks. If new project, call delimit_scan. Track all work via the ledger.';
+                fs.writeFileSync(GEMINI_CONFIG, JSON.stringify(geminiConfig, null, 2));
+            }
         } catch (e) {
             log(`  ${yellow('!')} Could not configure Gemini CLI: ${e.message}`);
         }
