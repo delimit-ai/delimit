@@ -1,1 +1,4 @@
-{ "$schema": "https://glama.ai/mcp/schemas/server.json", "maintainers": ["infracore"] }
+{
+  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "maintainers": ["infracore"]
+}
