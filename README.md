@@ -1,12 +1,12 @@
 # Delimit
 
-Catch breaking API changes before they reach production.
+Governance toolkit for AI coding assistants — API checks, persistent memory, consensus, security.
 
 [![npm](https://img.shields.io/npm/v/delimit-cli)](https://www.npmjs.com/package/delimit-cli)
-[![GitHub Action](https://img.shields.io/badge/GitHub%20Action-v1.4.0-blue)](https://github.com/marketplace/actions/delimit-api-governance)
+[![GitHub Action](https://img.shields.io/badge/GitHub%20Action-v1.5.0-blue)](https://github.com/marketplace/actions/delimit-api-governance)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-Delimit diffs your OpenAPI spec on every pull request. Breaking changes get flagged, semver gets classified, and your team gets a migration guide — automatically.
+Delimit gives your AI coding assistant governance tools — API breaking change detection, persistent task ledger, security audit, test verification, and multi-model deliberation. Works with Claude Code, Codex, Cursor, and Gemini CLI.
 
 ---
 

@@ -1,6 +1,6 @@
 {
   "name": "delimit-cli",
-  "version": "3.6.11",
+  "version": "3.6.12",
   "description": "Governance toolkit for AI coding assistants — API checks, persistent memory, consensus, security.",
   "main": "index.js",
   "files": [

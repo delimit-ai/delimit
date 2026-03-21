@@ -319,7 +319,7 @@ Run full governance compliance checks. Verify security, policy compliance, evide
     } else {
         // Check if existing CLAUDE.md is an older Delimit version that should be upgraded
         const existing = fs.readFileSync(claudeMd, 'utf-8');
-        if (existing.includes('# Delimit AI Guardrails') || existing.includes('delimit_init') || existing.includes('delimit_lint')) {
+        if (existing.includes('# Delimit AI Guardrails') || existing.includes('delimit_init') || existing.includes('delimit_lint') || existing.includes('persistent memory, verified execution')) {
             fs.writeFileSync(claudeMd, getClaudeMdContent());
             log(`  ${green('✓')} Updated ${claudeMd} with improved onboarding`);
         } else {
@@ -384,30 +384,33 @@ Run full governance compliance checks. Verify security, policy compliance, evide
 function getClaudeMdContent() {
     return `# Delimit
 
-Your AI has persistent memory, verified execution, and governance.
+Governance toolkit for AI coding assistants.
 
-## First time? Say one of these:
-- "check this project's health" -- see what Delimit finds
-- "add to ledger: [anything]" -- start tracking tasks
-- "what's on the ledger?" -- see what's pending
+## Try these:
+- "lint my API spec" -- catch breaking changes in your OpenAPI spec
+- "add to ledger: [anything]" -- track tasks across sessions
+- "what's on the ledger?" -- pick up where you left off
+- "check this project's health" -- run governance diagnostics
 
-## Returning? Your AI remembers:
-- Ledger items persist across sessions
-- Governance rules stay configured
-- Memory carries forward
+## What Delimit does:
+- **API governance** -- lint, diff, semver classification, migration guides
+- **Persistent ledger** -- tasks survive across sessions
+- **Security audit** -- dependency scanning, secret detection
+- **Test verification** -- confirm tests actually ran, measure coverage
+- **Multi-model deliberation** -- say "deliberate [question]" to get consensus from multiple AI models
 
-## On first session, your AI will automatically:
-1. Diagnose the environment to verify everything is connected
-2. Check the ledger for any pending items from previous sessions
-3. If no governance exists yet, suggest initializing it
+## GitHub Action
+Add breaking change detection to any repo:
+\`\`\`yaml
+- uses: delimit-ai/delimit-action@v1
+  with:
+    spec: api/openapi.yaml
+\`\`\`
 
-## Available Agents
-- /lint -- check API specs for breaking changes
-- /engineering -- build, test, refactor with governance checks
-- /governance -- full compliance audit
-
-## Need help?
-Say "delimit help" for docs on any capability.
+## Links
+- Docs: https://delimit.ai/docs
+- GitHub: https://github.com/delimit-ai/delimit
+- Action: https://github.com/marketplace/actions/delimit-api-governance
 `;
 }
 
