@@ -1,10 +1,8 @@
-```
-    ____  ________    ______  _____________
+   ____  ________    ______  _____________
    / __ \/ ____/ /   /  _/  |/  /  _/_  __/
   / / / / __/ / /    / // /|_/ // /  / /
  / /_/ / /___/ /____/ // /  / // /  / /
 /_____/_____/_____/___/_/  /_/___/ /_/
-```
 
 One workspace for every AI coding assistant. Switch models, not context.
 
@@ -13,6 +11,8 @@ One workspace for every AI coding assistant. Switch models, not context.
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 Your tasks, memory, and governance carry between Claude Code, Codex, and Gemini CLI. Persistent ledger, API breaking change detection, security audit, multi-model deliberation — all shared across assistants.
+
+[![delimit MCP server](https://glama.ai/mcp/servers/delimit-ai/delimit/badges/card.svg)](https://glama.ai/mcp/servers/delimit-ai/delimit)
 
 ---
 
