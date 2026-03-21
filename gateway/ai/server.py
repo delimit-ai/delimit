@@ -57,6 +57,36 @@ def _experimental_tool():
     return decorator
 
 
+# Pro tools — these require a valid license to execute
+PRO_TOOLS = {
+    "delimit_gov_evaluate",
+    "delimit_gov_policy", "delimit_gov_run", "delimit_gov_verify",
+    "delimit_deploy_plan", "delimit_deploy_build", "delimit_deploy_publish",
+    "delimit_deploy_verify", "delimit_deploy_rollback", "delimit_deploy_status",
+    "delimit_deploy_site", "delimit_deploy_npm",
+    "delimit_memory_store", "delimit_memory_search", "delimit_memory_recent",
+    "delimit_vault_search", "delimit_vault_snapshot", "delimit_vault_health",
+    "delimit_evidence_collect", "delimit_evidence_verify",
+    "delimit_deliberate", "delimit_models",
+    "delimit_obs_metrics", "delimit_obs_logs", "delimit_obs_status",
+    "delimit_release_plan", "delimit_release_status", "delimit_release_sync",
+    "delimit_cost_analyze", "delimit_cost_optimize", "delimit_cost_alert",
+}
+
+# Free tools — always available
+# lint, diff, semver, explain, policy, init, diagnose, help, version,
+# ledger_context, ledger_add, ledger_done, ledger_list, scan, zero_spec,
+# security_audit, security_scan, test_generate, test_smoke, activate, license_status
+
+
+def _check_pro(tool_name: str) -> Optional[Dict]:
+    """Gate Pro tools behind license check. Returns error dict or None."""
+    if tool_name not in PRO_TOOLS:
+        return None
+    from ai.license import require_premium
+    return require_premium(tool_name)
+
+
 def _safe_call(fn, **kwargs) -> Dict[str, Any]:
     """Wrap backend calls with deterministic error handling."""
     try:
@@ -250,14 +280,21 @@ NEXT_STEPS_REGISTRY: Dict[str, List[Dict[str, Any]]] = {
 
 
 def _with_next_steps(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
-    """Route every tool result through governance (replaces simple next_steps).
+    """Route every tool result through governance. This IS the loop.
 
-    Governance:
-    1. Checks result against rules (thresholds, policies)
-    2. Auto-creates ledger items for failures/warnings
-    3. Adds next_steps to keep the AI building
-    4. Loops back to governance via ledger_context suggestion
+    The governance loop:
+    1. Check Pro license gate (blocks if not authorized)
+    2. Check result against rules (thresholds, policies)
+    3. Auto-create ledger items for failures/warnings
+    4. Route back to delimit_ledger_context (the loop continues)
     """
+    # Pro license gate — blocks execution for premium tools
+    full_name = f"delimit_{tool_name}" if not tool_name.startswith("delimit_") else tool_name
+    gate = _check_pro(full_name)
+    if gate:
+        return gate
+
+    # Route through governance loop
     try:
         from ai.governance import govern
         return govern(tool_name, result)

@@ -431,9 +431,10 @@ function getClaudeMdContent() {
 One workspace for every AI coding assistant.
 
 ## On every session start:
-1. Call \`delimit_ledger_context\` to check for open tasks
-2. If returning user, summarize what's pending
-3. If new project, call \`delimit_scan\` to discover what Delimit can do
+1. Call \`delimit_gov_health\` to show governance status
+2. Call \`delimit_ledger_context\` to check for open tasks
+3. If returning user, summarize what's pending
+4. If new project, call \`delimit_scan\` to discover what Delimit can do
 
 ## Try these:
 - "scan this project" -- discover what Delimit can do here
