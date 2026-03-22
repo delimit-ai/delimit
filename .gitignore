@@ -4,3 +4,4 @@ adapters/
 *.log
 .DS_Store
 .mcpregistry_*
+adapters/
