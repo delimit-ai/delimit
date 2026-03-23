@@ -1277,6 +1277,14 @@ program
         console.log(chalk.dim('Tier: pro'));
     });
 
+// Version subcommand alias (users type 'delimit version' not 'delimit -V')
+program
+    .command('version')
+    .description('Show version')
+    .action(() => {
+        console.log(require('../package.json').version);
+    });
+
 // Hide legacy/internal commands from --help
 ['install', 'mode', 'status', 'policy', 'auth', 'audit',
  'explain-decision', 'uninstall', 'proxy', 'hook'].forEach(name => {
