@@ -504,8 +504,21 @@ echo "[Delimit] ${toolName} not found" >&2; exit 127
     }
     log('');
 
-    // Step 7: Done
-    step(7, 'Done!');
+    // Step 7: Local dashboard API server
+    step(7, 'Local dashboard API...');
+
+    const localServerPath = path.join(DELIMIT_HOME, 'server', 'ai', 'local_server.py');
+    if (fs.existsSync(localServerPath)) {
+        log(`  ${green('✓')} Local API server available on port 7823`);
+        log(`  ${dim('  Start it:  python3 ' + localServerPath)}`);
+        log(`  ${dim('  Dashboard connects to localhost:7823 automatically')}`);
+    } else {
+        log(`  ${dim('  Local API server not found — dashboard will use cloud sync')}`);
+    }
+    log('');
+
+    // Step 8: Done
+    step(8, 'Done!');
     log('');
     log(`  ${green('Delimit is installed.')} Your AI now has persistent memory and governance.`);
     log('');
