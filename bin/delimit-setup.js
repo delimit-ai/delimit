@@ -338,40 +338,36 @@ Run full governance compliance checks. Verify security, policy compliance, evide
     }
     log(`  ${green('✓')} ${installed} agents installed (${Object.keys(agents).length - installed} already existed)`);
 
-    // Step 5: Create CLAUDE.md for first-run guidance
-    step(5, 'Setting up first-run guidance...');
+    // Step 5: Create/update CLAUDE.md and platform instruction files
+    step(5, 'Setting up AI instruction files...');
 
     const claudeMd = path.join(os.homedir(), 'CLAUDE.md');
-    if (!fs.existsSync(claudeMd)) {
-        fs.writeFileSync(claudeMd, getClaudeMdContent());
-        log(`  ${green('✓')} Created ${claudeMd} with first-run guidance`);
+    const claudeResult = upsertDelimitSection(claudeMd);
+    if (claudeResult.action === 'created') {
+        log(`  ${green('✓')} Created ${claudeMd} with governance triggers`);
+    } else if (claudeResult.action === 'updated') {
+        log(`  ${green('✓')} Updated Delimit section in ${claudeMd} (version changed)`);
+    } else if (claudeResult.action === 'appended') {
+        log(`  ${green('✓')} Appended Delimit section to ${claudeMd} (user content preserved)`);
     } else {
-        // Check if existing CLAUDE.md is an older Delimit version that should be upgraded
-        const existing = fs.readFileSync(claudeMd, 'utf-8');
-        if (existing.includes('# Delimit AI Guardrails') || existing.includes('delimit_init') || existing.includes('delimit_lint') || existing.includes('persistent memory, verified execution')) {
-            fs.writeFileSync(claudeMd, getClaudeMdContent());
-            log(`  ${green('✓')} Updated ${claudeMd} with improved onboarding`);
-        } else {
-            log(`  ${dim('  CLAUDE.md already exists with custom content — skipped')}`);
-        }
+        log(`  ${dim('  CLAUDE.md already up to date')}`);
     }
-
-    // Create instruction files for other platforms
-    const instructionContent = getClaudeMdContent();
 
     // Codex instructions
     const codexInstructions = path.join(os.homedir(), '.codex', 'instructions.md');
     if (fs.existsSync(path.join(os.homedir(), '.codex'))) {
-        if (!fs.existsSync(codexInstructions) || fs.readFileSync(codexInstructions, 'utf-8').includes('# Delimit')) {
-            fs.writeFileSync(codexInstructions, instructionContent);
+        const codexResult = upsertDelimitSection(codexInstructions);
+        if (codexResult.action !== 'unchanged') {
+            log(`  ${green('✓')} ${codexResult.action === 'created' ? 'Created' : 'Updated'} ${codexInstructions}`);
         }
     }
 
     // Cursor rules
     const cursorRules = path.join(os.homedir(), '.cursorrules');
     if (fs.existsSync(path.join(os.homedir(), '.cursor'))) {
-        if (!fs.existsSync(cursorRules) || fs.readFileSync(cursorRules, 'utf-8').includes('# Delimit')) {
-            fs.writeFileSync(cursorRules, instructionContent);
+        const cursorResult = upsertDelimitSection(cursorRules);
+        if (cursorResult.action !== 'unchanged') {
+            log(`  ${green('✓')} ${cursorResult.action === 'created' ? 'Created' : 'Updated'} ${cursorRules}`);
         }
     }
 
@@ -540,8 +536,11 @@ echo "[Delimit] ${toolName} not found" >&2; exit 127
     log('');
 }
 
-function getClaudeMdContent() {
-    return `# Delimit
+function getDelimitSection() {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
+    const version = pkg.version || '0.0.0';
+    return `<!-- delimit:start v${version} -->
+# Delimit
 
 One workspace for every AI coding assistant.
 
@@ -577,7 +576,67 @@ Add breaking change detection to any repo:
 - Docs: https://delimit.ai/docs
 - GitHub: https://github.com/delimit-ai/delimit
 - Action: https://github.com/marketplace/actions/delimit-api-governance
-`;
+<!-- delimit:end -->`;
+}
+
+function getClaudeMdContent() {
+    return getDelimitSection() + '\n';
+}
+
+/**
+ * Upsert the Delimit section in a file using <!-- delimit:start --> / <!-- delimit:end --> markers.
+ * If markers exist, replaces only that region (preserving user content above/below).
+ * If no markers exist but old Delimit content is detected, replaces the whole file.
+ * If no Delimit content at all, appends the section.
+ * Returns { action: 'created' | 'updated' | 'unchanged' | 'appended' }
+ */
+function upsertDelimitSection(filePath) {
+    const newSection = getDelimitSection();
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
+    const version = pkg.version || '0.0.0';
+
+    if (!fs.existsSync(filePath)) {
+        fs.writeFileSync(filePath, newSection + '\n');
+        return { action: 'created' };
+    }
+
+    const existing = fs.readFileSync(filePath, 'utf-8');
+
+    // Check if markers already exist
+    const startMarkerRe = /<!-- delimit:start[^>]*-->/;
+    const endMarker = '<!-- delimit:end -->';
+    const hasStart = startMarkerRe.test(existing);
+    const hasEnd = existing.includes(endMarker);
+
+    if (hasStart && hasEnd) {
+        // Extract current version from the marker
+        const versionMatch = existing.match(/<!-- delimit:start v([^ ]+) -->/);
+        const currentVersion = versionMatch ? versionMatch[1] : '';
+        if (currentVersion === version) {
+            return { action: 'unchanged' };
+        }
+        // Replace only the delimit section
+        const before = existing.substring(0, existing.search(startMarkerRe));
+        const after = existing.substring(existing.indexOf(endMarker) + endMarker.length);
+        fs.writeFileSync(filePath, before + newSection + after);
+        return { action: 'updated' };
+    }
+
+    // No markers — check for old Delimit content that should be replaced
+    const isOldDelimit = existing.includes('# Delimit AI Guardrails') ||
+        existing.includes('delimit_init') ||
+        existing.includes('persistent memory, verified execution') ||
+        (existing.includes('# Delimit') && existing.includes('delimit_ledger_context'));
+
+    if (isOldDelimit) {
+        fs.writeFileSync(filePath, newSection + '\n');
+        return { action: 'updated' };
+    }
+
+    // File exists with user content but no Delimit section — append
+    const separator = existing.endsWith('\n') ? '\n' : '\n\n';
+    fs.writeFileSync(filePath, existing + separator + newSection + '\n');
+    return { action: 'appended' };
 }
 
 function copyDir(src, dest) {
