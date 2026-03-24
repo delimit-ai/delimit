@@ -1,6 +1,6 @@
 # `</>` Delimit
 
-One workspace for every AI coding assistant. Switch models, not context.
+Unify Claude Code, Codex, Cursor, and Gemini CLI with persistent context, governance, and multi-model debate.
 
 [![npm](https://img.shields.io/npm/v/delimit-cli)](https://www.npmjs.com/package/delimit-cli)
 [![GitHub Action](https://img.shields.io/badge/GitHub%20Action-v1.6.0-blue)](https://github.com/marketplace/actions/delimit-api-governance)
@@ -68,26 +68,40 @@ npx delimit-cli setup
 
 No API keys. No account. Installs in 10 seconds.
 
-### CLI commands
+### CLI commands (all free)
 
 ```bash
-npx delimit-cli lint api/openapi.yaml           # Check for breaking changes
+npx delimit-cli setup                            # Install into all AI assistants
+npx delimit-cli setup --dry-run                  # Preview changes first
+npx delimit-cli lint api/openapi.yaml            # Check for breaking changes
 npx delimit-cli diff old.yaml new.yaml           # Compare two specs
 npx delimit-cli explain old.yaml new.yaml        # Generate migration guide
 npx delimit-cli init --preset strict             # Initialize policies
 npx delimit-cli doctor                           # Check setup health
+npx delimit-cli uninstall --dry-run              # Preview removal
 ```
 
 ### What the MCP toolkit adds
 
-When installed into your AI coding assistant, Delimit provides:
+When installed into your AI coding assistant, Delimit provides tools across two tiers:
+
+#### Free (no account needed)
 
 - **API governance** -- lint, diff, policy enforcement, semver classification
-- **Test verification** -- confirms tests actually ran, measures coverage
-- **Security audit** -- scans dependencies, detects secrets and anti-patterns
-- **Persistent ledger** -- tracks tasks across sessions, auto-creates items from governance
-- **Multi-model consensus** -- Grok, Gemini, and Codex debate until they agree
+- **Persistent ledger** -- track tasks across sessions, shared between all AI assistants
 - **Zero-spec extraction** -- generate OpenAPI specs from FastAPI, Express, or NestJS source
+- **Project scan** -- auto-detect specs, frameworks, security issues, and tests
+- **Quickstart** -- guided first-run that proves value in 60 seconds
+
+#### Pro
+
+- **Multi-model deliberation** -- Grok, Gemini, and Codex debate until they agree
+- **Security audit** -- dependency scanning, secret detection, SAST analysis
+- **Test verification** -- confirms tests ran, measures coverage, generates new tests
+- **Memory & vault** -- persistent context and encrypted secrets across sessions
+- **Evidence collection** -- governance audit trail for compliance
+- **Deploy pipeline** -- governed build, publish, and rollback
+- **OS layer** -- agent identity, execution plans, approval gates
 
 ---
 
@@ -149,7 +163,7 @@ rules:
 - [delimit.ai](https://delimit.ai) -- homepage
 - [Docs](https://delimit.ai/docs) -- full documentation
 - [GitHub Action](https://github.com/marketplace/actions/delimit-api-governance) -- Marketplace listing
-- [Quickstart](https://github.com/delimit-ai/delimit-quickstart) -- try it in 2 minutes
+- [Quickstart](https://github.com/delimit-ai/delimit-mcp-server) -- try it in 2 minutes
 - [npm](https://www.npmjs.com/package/delimit-cli) -- CLI package
 - [Pricing](https://delimit.ai/pricing) -- free tier + Pro
 

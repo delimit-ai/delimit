@@ -415,12 +415,22 @@ Run full governance compliance checks. Verify security, policy compliance, evide
         }
     }
 
-    // Cursor rules
+    // Cursor rules (legacy .cursorrules + new .cursor/rules/ directory)
     const cursorRules = path.join(os.homedir(), '.cursorrules');
     if (fs.existsSync(path.join(os.homedir(), '.cursor'))) {
         const cursorResult = upsertDelimitSection(cursorRules);
         if (cursorResult.action !== 'unchanged') {
             log(`  ${green('✓')} ${cursorResult.action === 'created' ? 'Created' : 'Updated'} ${cursorRules}`);
+        }
+        // Also install to .cursor/rules/delimit.md (Cursor 0.45+)
+        try {
+            const cursorRulesDir = path.join(os.homedir(), '.cursor', 'rules');
+            fs.mkdirSync(cursorRulesDir, { recursive: true });
+            const cursorAdapter = require('../adapters/cursor-rules');
+            cursorAdapter.installRules(pkg.version);
+            log(`  ${green('✓')} Installed governance rules to .cursor/rules/delimit.md`);
+        } catch (e) {
+            log(`  ${dim('  Could not install .cursor/rules: ' + e.message)}`);
         }
     }
 
@@ -570,8 +580,97 @@ echo "[Delimit] ${toolName} not found" >&2; exit 127
     }
     log('');
 
-    // Step 8: Done
-    step(8, 'Done!');
+    // Step 8: Post-install config validation (LED-098)
+    step(8, 'Validating config integrity...');
+
+    let validationIssues = 0;
+    const configFiles = [
+        { path: MCP_CONFIG, name: 'Claude Code', format: 'json' },
+        { path: CODEX_CONFIG, name: 'Codex', format: 'toml' },
+        { path: CURSOR_CONFIG, name: 'Cursor', format: 'json' },
+        { path: GEMINI_CONFIG, name: 'Gemini CLI', format: 'json' },
+    ];
+
+    for (const cfg of configFiles) {
+        if (!fs.existsSync(cfg.path)) continue;
+        try {
+            const content = fs.readFileSync(cfg.path, 'utf-8');
+            if (cfg.format === 'json') {
+                const parsed = JSON.parse(content);
+                const servers = parsed.mcpServers || {};
+                const delimitEntry = servers.delimit;
+                if (delimitEntry) {
+                    // Validate the delimit entry points to our server
+                    const cmd = delimitEntry.command || '';
+                    const args = delimitEntry.args || [];
+                    const serverArg = args[0] || '';
+
+                    // Check command is python (not arbitrary binary)
+                    if (!cmd.includes('python') && !cmd.includes('venv')) {
+                        log(`  ${yellow('⚠')} ${cfg.name}: delimit command is not python: ${cmd}`);
+                        validationIssues++;
+                    }
+                    // Check server arg points to our server file
+                    if (serverArg && !serverArg.includes('delimit') && !serverArg.includes('server.py')) {
+                        log(`  ${yellow('⚠')} ${cfg.name}: server path looks unexpected: ${serverArg}`);
+                        validationIssues++;
+                    }
+                    // Check no unexpected MCP servers were added
+                    const knownServers = new Set(['delimit', 'codex', 'gemini', 'gemini-vertexai', 'filesystem', 'brave-search', 'fetch', 'memory', 'puppeteer', 'github', 'slack', 'datadog']);
+                    for (const serverName of Object.keys(servers)) {
+                        if (!knownServers.has(serverName) && !serverName.includes('delimit')) {
+                            // Not necessarily bad, just note it
+                        }
+                    }
+                }
+            } else if (cfg.format === 'toml') {
+                // Basic TOML check — ensure delimit entry has correct structure
+                if (content.includes('[mcp_servers.delimit]')) {
+                    if (!content.match(/command\s*=\s*"[^"]*python[^"]*"/)) {
+                        log(`  ${yellow('⚠')} ${cfg.name}: delimit command may not be python`);
+                        validationIssues++;
+                    }
+                }
+            }
+            log(`  ${green('✓')} ${cfg.name} config valid`);
+        } catch (e) {
+            log(`  ${yellow('⚠')} ${cfg.name}: could not validate — ${e.message}`);
+            validationIssues++;
+        }
+    }
+
+    // Verify server file exists and is our code
+    if (fs.existsSync(actualServer)) {
+        const serverContent = fs.readFileSync(actualServer, 'utf-8').substring(0, 500);
+        if (serverContent.includes('delimit') || serverContent.includes('Delimit')) {
+            log(`  ${green('✓')} Server file verified`);
+        } else {
+            log(`  ${yellow('⚠')} Server file at ${actualServer} does not appear to be Delimit`);
+            validationIssues++;
+        }
+    }
+
+    // Check directory permissions
+    try {
+        const stat = fs.statSync(DELIMIT_HOME);
+        const mode = (stat.mode & 0o777).toString(8);
+        if (mode.endsWith('7') || mode.endsWith('6')) {
+            log(`  ${yellow('⚠')} ~/.delimit/ is world-readable/writable (${mode}) — consider: chmod 700 ~/.delimit`);
+            validationIssues++;
+        } else {
+            log(`  ${green('✓')} Directory permissions OK`);
+        }
+    } catch {}
+
+    if (validationIssues === 0) {
+        log(`  ${green('✓')} All config validations passed`);
+    } else {
+        log(`  ${yellow(`⚠ ${validationIssues} issue(s) found — review above`)}`);
+    }
+    log('');
+
+    // Step 9: Done
+    step(9, 'Done!');
     log('');
     log(`  ${green('Delimit is installed.')} Your AI now has persistent memory and governance.`);
     log('');
@@ -598,7 +697,7 @@ echo "[Delimit] ${toolName} not found" >&2; exit 127
     log(`  ${dim('Agents:')} ${AGENTS_DIR}`);
     log('');
     log(`  ${dim('Docs:')} https://delimit.ai/docs`);
-    log(`  ${dim('GitHub:')} https://github.com/delimit-ai/delimit`);
+    log(`  ${dim('GitHub:')} https://github.com/delimit-ai/delimit-mcp-server`);
     log('');
 }
 

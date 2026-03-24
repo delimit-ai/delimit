@@ -64,7 +64,7 @@ Add breaking change detection to any repo:
 
 ## Links
 - Docs: https://delimit.ai/docs
-- GitHub: https://github.com/delimit-ai/delimit
+- GitHub: https://github.com/delimit-ai/delimit-mcp-server
 - Action: https://github.com/marketplace/actions/delimit-api-governance
 <!-- delimit:end -->`;
 }

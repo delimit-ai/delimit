@@ -443,77 +443,181 @@ program
 // Uninstall command
 program
     .command('uninstall')
-    .description('Remove Delimit governance')
+    .description('Remove Delimit governance from all AI assistants')
+    .option('--dry-run', 'Preview what would be removed without making changes')
+    .action(async (options) => {
+        const dryRun = options.dryRun;
+        const HOME = process.env.HOME;
+        const backupDir = path.join(HOME, '.delimit', 'backups', `uninstall-${Date.now()}`);
+        const changes = [];
 
-    .action(async () => {
-        const { confirm } = await inquirer.prompt([{
-            type: 'confirm',
-            name: 'confirm',
-            message: 'This will remove all Delimit governance. Continue?',
-            default: false
-        }]);
-        
-        if (!confirm) return;
-        
-        // Remove Git hooks
+        if (dryRun) {
+            console.log(chalk.yellow.bold('\nDRY RUN — No changes will be made\n'));
+        }
+
+        // Collect all changes first
+        // 1. Git hooks
         try {
-            execSync('git config --global --unset core.hooksPath');
-            console.log(chalk.green('✓ Removed Git hooks'));
+            const hooksPath = execSync('git config --global --get core.hooksPath 2>/dev/null', { encoding: 'utf8' }).trim();
+            if (hooksPath && hooksPath.includes('delimit')) {
+                changes.push({ target: 'Git global hooks', action: 'unset core.hooksPath', current: hooksPath });
+            }
         } catch (e) {}
-        
-        // Remove from PATH
+
+        // 2. Shell profiles
         const profiles = ['.bashrc', '.zshrc', '.profile'];
         profiles.forEach(profile => {
-            const profilePath = path.join(process.env.HOME, profile);
+            const profilePath = path.join(HOME, profile);
             if (fs.existsSync(profilePath)) {
-                let content = fs.readFileSync(profilePath, 'utf8');
-                content = content.replace(/# Delimit Governance Layer[\s\S]*?fi\n/g, '');
-                fs.writeFileSync(profilePath, content);
+                const content = fs.readFileSync(profilePath, 'utf8');
+                if (content.includes('# Delimit Governance Layer')) {
+                    changes.push({ target: `~/${profile}`, action: 'Remove Delimit PATH block' });
+                }
             }
         });
-        console.log(chalk.green('✓ Removed PATH modifications'));
 
-        // Remove MCP config from Claude Code
-        const mcpPath = path.join(process.env.HOME, '.mcp.json');
+        // 3. Claude Code MCP
+        const mcpPath = path.join(HOME, '.mcp.json');
         if (fs.existsSync(mcpPath)) {
             try {
                 const mcp = JSON.parse(fs.readFileSync(mcpPath, 'utf8'));
                 if (mcp.mcpServers && mcp.mcpServers.delimit) {
-                    delete mcp.mcpServers.delimit;
-                    fs.writeFileSync(mcpPath, JSON.stringify(mcp, null, 2));
-                    console.log(chalk.green('✓ Removed from Claude Code MCP config'));
+                    changes.push({ target: '~/.mcp.json', action: 'Remove delimit MCP entry' });
                 }
             } catch (e) {}
         }
 
-        // Remove from Codex config
-        const codexConfig = path.join(process.env.HOME, '.codex', 'config.json');
+        // 4. Codex config
+        const codexConfig = path.join(HOME, '.codex', 'config.json');
+        const codexToml = path.join(HOME, '.codex', 'config.toml');
         if (fs.existsSync(codexConfig)) {
             try {
                 const cfg = JSON.parse(fs.readFileSync(codexConfig, 'utf8'));
                 if (cfg.mcpServers && cfg.mcpServers.delimit) {
-                    delete cfg.mcpServers.delimit;
-                    fs.writeFileSync(codexConfig, JSON.stringify(cfg, null, 2));
-                    console.log(chalk.green('✓ Removed from Codex MCP config'));
+                    changes.push({ target: '~/.codex/config.json', action: 'Remove delimit MCP entry' });
+                }
+            } catch (e) {}
+        }
+        if (fs.existsSync(codexToml)) {
+            try {
+                const toml = fs.readFileSync(codexToml, 'utf8');
+                if (toml.includes('[mcp_servers.delimit]')) {
+                    changes.push({ target: '~/.codex/config.toml', action: 'Remove [mcp_servers.delimit] block' });
                 }
             } catch (e) {}
         }
 
-        // Remove from Gemini CLI config
-        const geminiConfig = path.join(process.env.HOME, '.gemini', 'settings.json');
+        // 5. Cursor config
+        const cursorConfig = path.join(HOME, '.cursor', 'mcp.json');
+        if (fs.existsSync(cursorConfig)) {
+            try {
+                const cfg = JSON.parse(fs.readFileSync(cursorConfig, 'utf8'));
+                if (cfg.mcpServers && cfg.mcpServers.delimit) {
+                    changes.push({ target: '~/.cursor/mcp.json', action: 'Remove delimit MCP entry' });
+                }
+            } catch (e) {}
+        }
+
+        // 6. Gemini CLI config
+        const geminiConfig = path.join(HOME, '.gemini', 'settings.json');
         if (fs.existsSync(geminiConfig)) {
             try {
                 const cfg = JSON.parse(fs.readFileSync(geminiConfig, 'utf8'));
                 if (cfg.mcpServers && cfg.mcpServers.delimit) {
+                    changes.push({ target: '~/.gemini/settings.json', action: 'Remove delimit MCP entry' });
+                }
+            } catch (e) {}
+        }
+
+        // 7. Shims
+        const shimsDir = path.join(HOME, '.delimit', 'shims');
+        if (fs.existsSync(shimsDir)) {
+            changes.push({ target: '~/.delimit/shims/', action: 'Remove CLI shims directory' });
+        }
+
+        if (changes.length === 0) {
+            console.log(chalk.green('\nNo Delimit integrations found. Nothing to remove.\n'));
+            return;
+        }
+
+        // Show what will be changed
+        console.log(chalk.bold('\nThe following changes will be made:\n'));
+        changes.forEach((c, i) => {
+            console.log(`  ${i + 1}. ${chalk.cyan(c.target)} — ${c.action}`);
+        });
+        console.log('');
+
+        if (dryRun) {
+            console.log(chalk.yellow('Run without --dry-run to apply these changes.\n'));
+            return;
+        }
+
+        const { confirm } = await inquirer.prompt([{
+            type: 'confirm',
+            name: 'confirm',
+            message: `Apply ${changes.length} changes? Backups will be saved to ~/.delimit/backups/`,
+            default: false
+        }]);
+
+        if (!confirm) return;
+
+        // Create backup directory
+        fs.mkdirSync(backupDir, { recursive: true });
+
+        // Execute changes with backups
+        // Git hooks
+        try {
+            execSync('git config --global --unset core.hooksPath 2>/dev/null');
+            console.log(chalk.green('✓ Removed Git hooks'));
+        } catch (e) {}
+
+        // Shell profiles
+        profiles.forEach(profile => {
+            const profilePath = path.join(HOME, profile);
+            if (fs.existsSync(profilePath)) {
+                let content = fs.readFileSync(profilePath, 'utf8');
+                if (content.includes('# Delimit Governance Layer')) {
+                    fs.copyFileSync(profilePath, path.join(backupDir, profile));
+                    content = content.replace(/# Delimit Governance Layer[\s\S]*?fi\n/g, '');
+                    fs.writeFileSync(profilePath, content);
+                }
+            }
+        });
+        console.log(chalk.green('✓ Removed PATH modifications'));
+
+        // Helper to remove delimit from JSON config
+        function removeFromJsonConfig(configPath, label) {
+            if (!fs.existsSync(configPath)) return;
+            try {
+                const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+                if (cfg.mcpServers && cfg.mcpServers.delimit) {
+                    fs.copyFileSync(configPath, path.join(backupDir, path.basename(configPath) + '.' + label));
                     delete cfg.mcpServers.delimit;
-                    fs.writeFileSync(geminiConfig, JSON.stringify(cfg, null, 2));
-                    console.log(chalk.green('✓ Removed from Gemini CLI MCP config'));
+                    fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2));
+                    console.log(chalk.green(`✓ Removed from ${label}`));
+                }
+            } catch (e) {}
+        }
+
+        removeFromJsonConfig(mcpPath, 'claude-code');
+        removeFromJsonConfig(codexConfig, 'codex');
+        removeFromJsonConfig(cursorConfig, 'cursor');
+        removeFromJsonConfig(geminiConfig, 'gemini');
+
+        // Handle Codex TOML config
+        if (fs.existsSync(codexToml)) {
+            try {
+                let toml = fs.readFileSync(codexToml, 'utf8');
+                if (toml.includes('[mcp_servers.delimit]')) {
+                    fs.copyFileSync(codexToml, path.join(backupDir, 'config.toml.codex'));
+                    toml = toml.replace(/\n\[mcp_servers\.delimit\][\s\S]*?(?=\n\[|$)/, '');
+                    fs.writeFileSync(codexToml, toml);
+                    console.log(chalk.green('✓ Removed from Codex TOML config'));
                 }
             } catch (e) {}
         }
 
         // Remove shims
-        const shimsDir = path.join(process.env.HOME, '.delimit', 'shims');
         if (fs.existsSync(shimsDir)) {
             try {
                 fs.rmSync(shimsDir, { recursive: true });
@@ -522,6 +626,7 @@ program
         }
 
         console.log(chalk.green('\n  Delimit has been completely removed.'));
+        console.log(chalk.gray(`  Backups saved to: ${backupDir}`));
         console.log(chalk.gray('  Your data in ~/.delimit/ has been preserved.'));
         console.log(chalk.gray('  Delete it manually if you want: rm -rf ~/.delimit\n'));
     });
@@ -1239,8 +1344,54 @@ program
 // Setup command — install MCP governance tools into Claude Code
 program
     .command('setup')
-    .description('Install Delimit MCP governance tools into Claude Code')
-    .action(() => {
+    .description('Install Delimit MCP governance tools into all AI assistants')
+    .option('--dry-run', 'Preview config changes without writing anything')
+    .action((options) => {
+        if (options.dryRun) {
+            const os = require('os');
+            const HOME = os.homedir();
+            console.log(chalk.yellow.bold('\nDRY RUN — Previewing setup changes\n'));
+
+            const configs = [
+                { name: 'Claude Code', path: path.join(HOME, '.mcp.json'), key: 'mcpServers.delimit' },
+                { name: 'Codex', path: path.join(HOME, '.codex', 'config.toml'), key: '[mcp_servers.delimit]' },
+                { name: 'Cursor', path: path.join(HOME, '.cursor', 'mcp.json'), key: 'mcpServers.delimit' },
+                { name: 'Gemini CLI', path: path.join(HOME, '.gemini', 'settings.json'), key: 'mcpServers.delimit' },
+            ];
+
+            console.log(chalk.bold('Files that will be created or modified:\n'));
+            console.log(`  ${chalk.cyan('~/.delimit/')} — Delimit home directory (server, ledger, config)`);
+
+            configs.forEach(cfg => {
+                const exists = fs.existsSync(cfg.path);
+                let hasDelimit = false;
+                if (exists) {
+                    try {
+                        const content = fs.readFileSync(cfg.path, 'utf8');
+                        hasDelimit = content.includes('delimit');
+                    } catch {}
+                }
+                const relPath = cfg.path.replace(HOME, '~');
+                if (hasDelimit) {
+                    console.log(`  ${chalk.green('✓')} ${relPath} — ${cfg.name} already configured`);
+                } else if (exists) {
+                    console.log(`  ${chalk.yellow('+')} ${relPath} — Will add delimit entry to ${cfg.name}`);
+                } else {
+                    const dirExists = fs.existsSync(path.dirname(cfg.path));
+                    if (dirExists || cfg.name === 'Claude Code') {
+                        console.log(`  ${chalk.yellow('+')} ${relPath} — Will create for ${cfg.name}`);
+                    } else {
+                        console.log(`  ${chalk.dim('—')} ${relPath} — ${cfg.name} not installed, skipping`);
+                    }
+                }
+            });
+
+            console.log(`\n  ${chalk.cyan('~/.delimit/venv/')} — Isolated Python virtual environment`);
+            console.log(`  ${chalk.cyan('~/.delimit/ledger/')} — Persistent task ledger`);
+
+            console.log(chalk.yellow('\nRun without --dry-run to apply these changes.\n'));
+            return;
+        }
         require('./delimit-setup.js');
     });
 

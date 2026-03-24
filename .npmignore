@@ -1,3 +1,35 @@
+# Build artifacts
 **/__pycache__/
 **/*.pyc
 **/*.bak
+
+# Development
+.github/
+tests/
+.eslintrc*
+.prettierrc*
+.editorconfig
+*.test.js
+*.spec.js
+
+# Secrets & credentials — NEVER publish
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+credentials*
+secrets/
+.npmrc
+**/.npmrc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,92 @@
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (no actual publish)'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+permissions:
+  contents: read
+  id-token: write  # Required for npm provenance
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    name: Pre-publish Validation
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - run: npm install
+
+      - run: npm test
+
+      - name: Check version matches tag
+        if: github.event_name == 'release'
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::package.json version ($PKG_VERSION) does not match tag ($TAG_VERSION)"
+            exit 1
+          fi
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+      - name: Check for secrets in package
+        run: |
+          # Ensure no secrets leak into the published package
+          npm pack --dry-run 2>&1 | tee /tmp/pack-list.txt
+          for pattern in '.env' 'credentials' 'secret' '.npmrc' '.key' '.pem'; do
+            if grep -i "$pattern" /tmp/pack-list.txt; then
+              echo "::error::Potential secret file found in package: $pattern"
+              exit 1
+            fi
+          done
+
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    name: Publish
+    environment: npm-publish  # Requires manual approval in GitHub
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm install
+
+      - name: Publish (dry run)
+        if: github.event.inputs.dry_run == 'true' || github.event_name != 'release'
+        run: npm publish --dry-run
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish to npm
+        if: (github.event.inputs.dry_run != 'true' && github.event_name == 'workflow_dispatch') || github.event_name == 'release'
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Verify published version
+        if: github.event_name == 'release'
+        run: |
+          sleep 10
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          npm view delimit-cli@$PKG_VERSION version

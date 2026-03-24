@@ -4,7 +4,8 @@
 
 | Version | Supported |
 | ------- | --------- |
-| 2.x     | Yes       |
+| 3.x     | Yes       |
+| 2.x     | Security fixes only |
 | 1.x     | No        |
 
 ## Reporting a Vulnerability
@@ -36,6 +37,14 @@ When using Delimit:
 2. **Use environment variables** for sensitive configuration
 3. **Keep Delimit updated** to the latest version
 4. **Review PR annotations** before merging
+
+## Supply Chain Security
+
+- **npm provenance**: All releases are published with npm provenance attestation, linking each package version to the exact GitHub commit and CI workflow that produced it
+- **No install scripts**: The `postinstall` hook only prints a setup reminder — no code execution during `npm install`
+- **Dependency audit**: All dependencies are audited for vulnerabilities before each release
+- **Package contents**: Only `bin/`, `lib/`, `gateway/`, and documentation files are included. Secrets, tests, and dev files are excluded via `.npmignore`
+- **Publish workflow**: Releases require CI validation, dependency audit, and secrets scan before publishing
 
 ## Data Privacy
 

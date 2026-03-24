@@ -37,7 +37,7 @@ delimit doctor
 
 ### GitHub Action
 
-See [delimit-action](https://github.com/delimit-ai/delimit-action) for CI integration.
+See [delimit-action](https://github.com/delimit-ai/delimit-mcp-server-action) for CI integration.
 
 ## Code Style
 
@@ -63,5 +63,5 @@ All PRs must:
 
 ## Questions?
 
-- Open a [Discussion](https://github.com/delimit-ai/delimit/discussions) on GitHub
+- Open a [Discussion](https://github.com/delimit-ai/delimit-mcp-server/discussions) on GitHub
 - Email opensource@delimit.ai
