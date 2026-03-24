@@ -15,7 +15,7 @@ function getDelimitSection() {
     return `<!-- delimit:start v${PKG_VERSION} -->
 # Delimit
 
-One workspace for every AI coding assistant.
+Unify all AI coding assistants with persistent context, governance, and multi-model debate.
 
 ## On every session start:
 1. Call \`delimit_ledger_context\` to check for open tasks

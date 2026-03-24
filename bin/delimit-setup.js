@@ -707,7 +707,7 @@ function getDelimitSection() {
     return `<!-- delimit:start v${version} -->
 # Delimit
 
-One workspace for every AI coding assistant.
+Unify all AI coding assistants with persistent context, governance, and multi-model debate.
 
 ## On every session start:
 1. Call \`delimit_ledger_context\` to check for open tasks
@@ -756,7 +756,7 @@ Add breaking change detection to any repo:
 
 ## Links
 - Docs: https://delimit.ai/docs
-- GitHub: https://github.com/delimit-ai/delimit
+- GitHub: https://github.com/delimit-ai/delimit-mcp-server
 - Action: https://github.com/marketplace/actions/delimit-api-governance
 <!-- delimit:end -->`;
 }
