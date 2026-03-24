@@ -54,7 +54,7 @@ async function main() {
     log(blue('  / / / / __/ / /    / // /|_/ // /  / /   '));
     log(blue(' / /_/ / /___/ /____/ // /  / // /  / /    '));
     log(blue('/_____/_____/_____/___/_/  /_/___/ /_/     '));
-    log(dim('  One workspace for every AI coding assistant'));
+    log(dim('  Unify all AI coding assistants'));
     log('');
 
     // Step 1: Check prerequisites
