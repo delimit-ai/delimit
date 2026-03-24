@@ -1,15 +1,61 @@
 #!/bin/bash
-# Delimit pre-push: security scan + test smoke
-echo "[Delimit] Running pre-push checks..."
+# Delimit pre-push: run tests before allowing push
+# LED-129: Catch CI failures locally before they hit remote
 
-if command -v npx &> /dev/null; then
-  npx delimit-cli doctor 2>/dev/null || true
+DELIMIT_HOME="${DELIMIT_HOME:-$HOME/.delimit}"
+MODE_FILE="$DELIMIT_HOME/enforcement_mode"
+MODE="guarded"
+[ -f "$MODE_FILE" ] && MODE=$(cat "$MODE_FILE" 2>/dev/null || echo "guarded")
+
+# Advisory mode: skip all checks
+if [ "$MODE" = "advisory" ]; then
+  exit 0
 fi
 
-# Fallback: run the CLI hook handler if the agent is available
-if command -v node &> /dev/null; then
-  HOOK_CLI="$(dirname "$0")/../../bin/delimit-cli.js"
-  if [ -f "$HOOK_CLI" ]; then
-    node "$HOOK_CLI" hook pre-push 2>/dev/null || true
+echo "[Delimit] Pre-push governance check (mode: $MODE)"
+
+# 1. Detect test framework and run tests
+TEST_PASSED=true
+if [ -f "pyproject.toml" ] || [ -f "setup.py" ] || [ -f "pytest.ini" ]; then
+  echo "[Delimit] Running pytest..."
+  if command -v python3 &> /dev/null; then
+    python3 -m pytest --tb=short -q --timeout=120 2>&1 | tail -5
+    if [ ${PIPESTATUS[0]} -ne 0 ]; then
+      TEST_PASSED=false
+    fi
+  fi
+elif [ -f "package.json" ]; then
+  if grep -q '"test"' package.json 2>/dev/null; then
+    echo "[Delimit] Running npm test..."
+    npm test 2>&1 | tail -10
+    if [ ${PIPESTATUS[0]} -ne 0 ]; then
+      TEST_PASSED=false
+    fi
   fi
 fi
+
+# 2. Check for hardcoded paths (common CI failure cause)
+HARDCODED=$(grep -rn '/home/[a-z]' --include="*.py" --include="*.js" --include="*.ts" . 2>/dev/null | grep -v node_modules | grep -v .git | grep -v __pycache__ | head -3)
+if [ -n "$HARDCODED" ]; then
+  echo "[Delimit] Warning: hardcoded paths detected (may fail in CI):"
+  echo "$HARDCODED"
+fi
+
+# 3. Check for .env files that shouldn't be committed
+if git diff --cached --name-only 2>/dev/null | grep -qE '\.env$|\.env\.'; then
+  echo "[Delimit] Warning: .env file staged for commit"
+fi
+
+# 4. Block push if tests failed (enforce/guarded mode)
+if [ "$TEST_PASSED" = "false" ]; then
+  echo ""
+  echo "[Delimit] BLOCKED: Tests failed. Fix tests before pushing."
+  echo "[Delimit] To bypass: git push --no-verify"
+  echo "[Delimit] To switch mode: echo advisory > $MODE_FILE"
+  if [ "$MODE" = "enforce" ] || [ "$MODE" = "guarded" ]; then
+    exit 1
+  fi
+fi
+
+echo "[Delimit] Pre-push checks passed"
+exit 0
