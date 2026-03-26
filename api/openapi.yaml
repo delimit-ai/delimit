@@ -1,0 +1,119 @@
+openapi: 3.0.3
+info:
+  title: Delimit MCP Server API
+  version: 1.0.0
+  description: API for the Delimit MCP governance server
+paths:
+  /api/health:
+    get:
+      summary: Health check
+      operationId: getHealth
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [healthy, degraded]
+                  version:
+                    type: string
+                  uptime:
+                    type: integer
+                    description: Uptime in seconds
+  /api/lint:
+    post:
+      summary: Lint an OpenAPI spec for issues
+      operationId: lintSpec
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - spec
+              properties:
+                spec:
+                  type: string
+                  description: OpenAPI spec content (YAML or JSON)
+                preset:
+                  type: string
+                  enum: [strict, default, relaxed]
+                  default: default
+      responses:
+        '200':
+          description: Lint results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  violations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        rule:
+                          type: string
+                        severity:
+                          type: string
+                          enum: [error, warning, info]
+                        message:
+                          type: string
+                        path:
+                          type: string
+                  summary:
+                    type: object
+                    properties:
+                      errors:
+                        type: integer
+                      warnings:
+                        type: integer
+                      passed:
+                        type: boolean
+  /api/diff:
+    post:
+      summary: Diff two OpenAPI specs
+      operationId: diffSpecs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - old_spec
+                - new_spec
+              properties:
+                old_spec:
+                  type: string
+                new_spec:
+                  type: string
+      responses:
+        '200':
+          description: Diff results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  changes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        type:
+                          type: string
+                        breaking:
+                          type: boolean
+                        path:
+                          type: string
+                        description:
+                          type: string
+                  semver:
+                    type: string
+                    enum: [major, minor, patch, none]
