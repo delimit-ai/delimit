@@ -22,8 +22,8 @@ paths:
                   version:
                     type: string
                   uptime:
-                    type: integer
-                    description: Uptime in seconds
+                    type: string
+                    description: Uptime as ISO 8601 duration
   /api/lint:
     post:
       summary: Lint an OpenAPI spec for issues
@@ -44,6 +44,10 @@ paths:
                   type: string
                   enum: [strict, default, relaxed]
                   default: default
+                format:
+                  type: string
+                  enum: [yaml, json]
+                  description: Input format hint
       responses:
         '200':
           description: Lint results
@@ -69,9 +73,9 @@ paths:
                   summary:
                     type: object
                     properties:
-                      errors:
+                      error_count:
                         type: integer
-                      warnings:
+                      warning_count:
                         type: integer
                       passed:
                         type: boolean
