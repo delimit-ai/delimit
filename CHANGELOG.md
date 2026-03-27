@@ -1,5 +1,10 @@
 # Changelog
 
+## [3.13.3] - 2026-03-27
+
+### Changed
+- Postinstall message now shows full quick-start guide (init, lint, setup) with links to dashboard and docs
+
 ## [3.13.1] - 2026-03-27
 
 ### Added
