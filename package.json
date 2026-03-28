@@ -21,7 +21,7 @@
   },
   "scripts": {
     "postinstall": "node scripts/postinstall.js",
-    "test": "node --test tests/setup-onboarding.test.js tests/setup-matrix.test.js tests/config-export-import.test.js tests/cross-model-hooks.test.js"
+    "test": "node --test tests/setup-onboarding.test.js tests/setup-matrix.test.js tests/config-export-import.test.js tests/cross-model-hooks.test.js tests/golden-path.test.js"
   },
   "keywords": [
     "openapi",
