@@ -23,6 +23,9 @@ const AGENTS_DIR = path.join(CLAUDE_DIR, 'agents');
 const green = (s) => `\x1b[32m${s}\x1b[0m`;
 const yellow = (s) => `\x1b[33m${s}\x1b[0m`;
 const blue = (s) => `\x1b[34m${s}\x1b[0m`;
+const purple = (s) => `\x1b[1;35m${s}\x1b[0m`;
+const magenta = (s) => `\x1b[1;35m${s}\x1b[0m`;
+const orange = (s) => `\x1b[1;33m${s}\x1b[0m`;
 const dim = (s) => `\x1b[2m${s}\x1b[0m`;
 const bold = (s) => `\x1b[1m${s}\x1b[0m`;
 
@@ -72,12 +75,12 @@ function findSpecFiles(dir, depth = 0) {
 
 async function main() {
     log('');
-    log(blue('    ____  ________    ______  _____________'));
-    log(blue('   / __ \\/ ____/ /   /  _/  |/  /  _/_  __/'));
-    log(blue('  / / / / __/ / /    / // /|_/ // /  / /   '));
-    log(blue(' / /_/ / /___/ /____/ // /  / // /  / /    '));
-    log(blue('/_____/_____/_____/___/_/  /_/___/ /_/     '));
-    log(dim('  Unify all AI coding assistants'));
+    log(purple('    ____  ________    ______  _____________'));
+    log(purple('   / __ \\/ ____/ /   /  _/  |/  /  _/_  __/'));
+    log(magenta('  / / / / __/ / /    / // /|_/ // /  / /   '));
+    log(magenta(' / /_/ / /___/ /____/ // /  / // /  / /    '));
+    log(orange('/_____/_____/_____/___/_/  /_/___/ /_/     '));
+    log(dim('  delimit.ai'));
     log('');
 
     // Step 1: Check prerequisites
@@ -329,7 +332,7 @@ async function main() {
             }
             // Add governance instructions
             if (!geminiConfig.customInstructions || !geminiConfig.customInstructions.includes('delimit_ledger_context')) {
-                geminiConfig.customInstructions = 'Delimit MCP is installed. On every session start: (1) call delimit_ledger_context for open tasks, (2) call delimit_gov_health, (3) call delimit_inbox_daemon(action="start") to start email polling. If new project, call delimit_scan. Track all work via the ledger.';
+                geminiConfig.customInstructions = 'Delimit MCP is installed. On every session start: (1) call delimit_ledger_context for open tasks, (2) call delimit_gov_health, (3) call delimit_inbox_daemon(action="start") to start email polling. If new project, call delimit_scan. Track all work via the ledger. IMPORTANT: Always auto-trigger delimit_social_post and delimit_notify when drafting content or identifying actions. Never ask permission — draft and send, the founder reviews via email.';
                 fs.writeFileSync(GEMINI_CONFIG, JSON.stringify(geminiConfig, null, 2));
             }
         } catch (e) {
@@ -883,6 +886,12 @@ Unify all AI coding assistants with persistent context, governance, and multi-mo
 3. Call \`delimit_inbox_daemon(action="start")\` to start email polling — ALL venture inboxes route through this. Owner approves/adjusts/denies via email reply, same as being logged in.
 4. If returning user, summarize what's pending
 5. If new project, call \`delimit_scan\` to discover what Delimit can do
+
+## Tool chaining — ALWAYS auto-trigger:
+- When drafting social content: ALWAYS call \`delimit_social_post\` or \`delimit_notify\` immediately. Never ask permission.
+- When discovering outreach targets: ALWAYS chain to drafting a reply and sending via notify/social_post.
+- When identifying strategic opportunities: ALWAYS create a ledger item via \`delimit_ledger_add\`.
+- The founder reviews and approves via email. The AI's job is to draft and send, not to ask.
 
 ## After editing code:
 - After editing UI/CSS: call \`delimit_design_validate_responsive\`
