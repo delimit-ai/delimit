@@ -551,6 +551,8 @@ def docs_generate(target: str = ".", options: Optional[Dict] = None) -> Dict[str
 
     # Scan Python files
     for py_file in sorted(project.rglob("*.py")):
+        if not py_file.is_file():
+            continue
         if any(d in py_file.parts for d in skip_dirs):
             continue
         if py_file.name.startswith("test_") or py_file.name == "conftest.py":
@@ -569,6 +571,8 @@ def docs_generate(target: str = ".", options: Optional[Dict] = None) -> Dict[str
     # Scan JS/TS files
     for ext in ("*.js", "*.ts", "*.jsx", "*.tsx"):
         for js_file in sorted(project.rglob(ext)):
+            if not js_file.is_file():
+                continue
             if any(d in js_file.parts for d in skip_dirs):
                 continue
             if ".test." in js_file.name or ".spec." in js_file.name:
@@ -715,6 +719,8 @@ def docs_validate(target: str = ".", options: Optional[Dict] = None) -> Dict[str
     missing_docs = []
 
     for py_file in sorted(project.rglob("*.py")):
+        if not py_file.is_file():
+            continue
         if any(d in py_file.parts for d in skip_dirs):
             continue
         if py_file.name.startswith("test_") or py_file.name == "conftest.py":
@@ -731,6 +737,8 @@ def docs_validate(target: str = ".", options: Optional[Dict] = None) -> Dict[str
     # 3. Check broken internal links in all markdown files
     broken_links = []
     for md_file in sorted(project.rglob("*.md")):
+        if not md_file.is_file():
+            continue
         if any(d in md_file.parts for d in skip_dirs):
             continue
         broken_links.extend(_check_broken_links(md_file, project))

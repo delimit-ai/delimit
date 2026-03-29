@@ -34,8 +34,8 @@ DEPLOYS_DIR = Path(os.environ.get("DELIMIT_DEPLOYS_DIR", os.path.expanduser("~/.
 SECRET_PATTERNS = {
     "aws_access_key": r"(?:AKIA[0-9A-Z]{16})",
     "aws_secret_key": r"(?:aws_secret_access_key|AWS_SECRET_ACCESS_KEY)\s*[=:]\s*['\"]?[A-Za-z0-9/+=]{40}",
-    "generic_api_key": r"(?:api[_-]?key|apikey)\s*[=:]\s*['\"]?[A-Za-z0-9_\-]{20,}",
-    "generic_secret": r"(?:secret|password|passwd|token)\s*[=:]\s*['\"]?[^\s'\"]{8,}",
+    "generic_api_key": r"\b(?:api[_-]?key|apikey)\b\s*[=:]\s*['\"]?[A-Za-z0-9_\-]{20,}",
+    "generic_secret": r"\b(?:secret|password|passwd|token)\b\s*[=:]\s*['\"]?[^\s'\"]{8,}",
     "private_key_header": r"-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----",
     "github_token": r"gh[pousr]_[A-Za-z0-9_]{36,}",
     "slack_token": r"xox[baprs]-[0-9A-Za-z\-]{10,}",
@@ -62,7 +62,17 @@ SKIP_DIRS = {"node_modules", ".git", "__pycache__", ".venv", "venv", ".tox", "di
 
 
 def _run_cmd(cmd: List[str], timeout: int = 30, cwd: Optional[str] = None) -> Dict[str, Any]:
-    """Run a command and return stdout, stderr, returncode."""
+    """Run a command and return stdout, stderr, returncode.
+
+    Security: always uses list-form args (never shell=True).
+    Validates cwd if provided and rejects null bytes in arguments.
+    """
+    # Defense-in-depth: reject null bytes in any argument
+    for i, arg in enumerate(cmd):
+        if "\x00" in str(arg):
+            return {"stdout": "", "stderr": f"Argument {i} contains null bytes", "returncode": -4}
+    if cwd and "\x00" in cwd:
+        return {"stdout": "", "stderr": "cwd contains null bytes", "returncode": -4}
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd)
         return {"stdout": result.stdout, "stderr": result.stderr, "returncode": result.returncode}
@@ -74,6 +84,28 @@ def _run_cmd(cmd: List[str], timeout: int = 30, cwd: Optional[str] = None) -> Di
         return {"stdout": "", "stderr": str(e), "returncode": -3}
 
 
+def _bump_semver(version: str, bump: str) -> str:
+    """Compute the next semver version without mutating files."""
+    try:
+        major_s, minor_s, patch_s = version.split(".", 2)
+        major = int(major_s)
+        minor = int(minor_s)
+        patch = int(patch_s)
+    except Exception as exc:
+        raise ValueError(f"Invalid semver version '{version}'") from exc
+
+    if bump == "patch":
+        patch += 1
+    elif bump == "minor":
+        minor += 1
+        patch = 0
+    elif bump == "major":
+        major += 1
+        minor = 0
+        patch = 0
+    return f"{major}.{minor}.{patch}"
+
+
 def _scan_files(target: str) -> List[Path]:
     """Collect scannable source files under target."""
     root = Path(target).resolve()
@@ -82,14 +114,15 @@ def _scan_files(target: str) -> List[Path]:
         return [root]
     if not root.is_dir():
         return []
-    for p in root.rglob("*"):
-        if any(skip in p.parts for skip in SKIP_DIRS):
-            continue
-        if p.is_file() and p.suffix in SCAN_EXTENSIONS:
-            files.append(p)
-        # Cap to avoid scanning massive repos
-        if len(files) >= 5000:
-            break
+    for dirpath, dirnames, filenames in os.walk(root, onerror=lambda _err: None):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        for filename in filenames:
+            p = Path(dirpath) / filename
+            if p.suffix in SCAN_EXTENSIONS:
+                files.append(p)
+            # Cap to avoid scanning massive repos
+            if len(files) >= 5000:
+                return files
     return files
 
 
@@ -892,36 +925,27 @@ def deploy_site(project_path: str = ".", message: str = "", env_vars: dict = Non
     except Exception as e:
         return {"error": f"Git status failed: {e}"}
 
-    # 2. Git add + commit
-    commit_msg = message or "deploy: site update"
-    try:
-        subprocess.run(["git", "add", "-A"], cwd=str(p), timeout=10, capture_output=True)
-        result = subprocess.run(
-            ["git", "commit", "-m", commit_msg],
-            cwd=str(p), timeout=10, capture_output=True, text=True
-        )
-        if result.returncode == 0:
-            results["steps"].append({"step": "commit", "status": "ok", "message": commit_msg})
-        else:
-            results["steps"].append({"step": "commit", "status": "skipped", "detail": "nothing to commit"})
-    except Exception as e:
-        results["steps"].append({"step": "commit", "status": "error", "detail": str(e)})
-
-    # 3. Git push
+    # 2. Preflight the git remote before creating a commit.
     try:
         result = subprocess.run(
-            ["git", "push", "origin", "HEAD"],
+            ["git", "push", "--dry-run", "origin", "HEAD"],
             cwd=str(p), timeout=30, capture_output=True, text=True
         )
-        results["steps"].append({
-            "step": "push",
-            "status": "ok" if result.returncode == 0 else "error",
-            "detail": result.stderr.strip()[:200] if result.returncode != 0 else "pushed"
-        })
+        if result.returncode != 0:
+            results["steps"].append({
+                "step": "push_precheck",
+                "status": "error",
+                "detail": (result.stderr.strip() or result.stdout.strip())[:200],
+            })
+            results["status"] = "push_precheck_failed"
+            return results
+        results["steps"].append({"step": "push_precheck", "status": "ok"})
     except Exception as e:
-        results["steps"].append({"step": "push", "status": "error", "detail": str(e)})
+        results["steps"].append({"step": "push_precheck", "status": "error", "detail": str(e)})
+        results["status"] = "push_precheck_error"
+        return results
 
-    # 4. Vercel build
+    # 3. Vercel build
     env = {**os.environ}
     if env_vars:
         # Whitelist safe env var prefixes — block LD_PRELOAD, PATH overrides, etc.
@@ -952,7 +976,68 @@ def deploy_site(project_path: str = ".", message: str = "", env_vars: dict = Non
         results["status"] = "build_error"
         return results
 
-    # 5. Vercel deploy
+    # 4. Git add + commit
+    commit_msg = message or "deploy: site update"
+    try:
+        result = subprocess.run(["git", "add", "-A"], cwd=str(p), timeout=10, capture_output=True, text=True)
+        if result.returncode != 0:
+            results["steps"].append({
+                "step": "git_add",
+                "status": "error",
+                "detail": (result.stderr.strip() or result.stdout.strip())[:200],
+            })
+            results["status"] = "git_add_failed"
+            return results
+        results["steps"].append({"step": "git_add", "status": "ok"})
+    except Exception as e:
+        results["steps"].append({"step": "git_add", "status": "error", "detail": str(e)})
+        results["status"] = "git_add_error"
+        return results
+
+    try:
+        result = subprocess.run(
+            ["git", "commit", "-m", commit_msg],
+            cwd=str(p), timeout=10, capture_output=True, text=True
+        )
+        commit_output = f"{result.stdout}\n{result.stderr}".lower()
+        if result.returncode == 0:
+            results["steps"].append({"step": "commit", "status": "ok", "message": commit_msg})
+        elif "nothing to commit" in commit_output or "working tree clean" in commit_output:
+            results["steps"].append({"step": "commit", "status": "skipped", "detail": "nothing to commit"})
+        else:
+            results["steps"].append({
+                "step": "commit",
+                "status": "error",
+                "detail": (result.stderr.strip() or result.stdout.strip())[:200],
+            })
+            results["status"] = "commit_failed"
+            return results
+    except Exception as e:
+        results["steps"].append({"step": "commit", "status": "error", "detail": str(e)})
+        results["status"] = "commit_error"
+        return results
+
+    # 5. Git push
+    try:
+        result = subprocess.run(
+            ["git", "push", "origin", "HEAD"],
+            cwd=str(p), timeout=30, capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            results["steps"].append({
+                "step": "push",
+                "status": "error",
+                "detail": (result.stderr.strip() or result.stdout.strip())[:200],
+            })
+            results["status"] = "push_failed"
+            return results
+        results["steps"].append({"step": "push", "status": "ok", "detail": "pushed"})
+    except Exception as e:
+        results["steps"].append({"step": "push", "status": "error", "detail": str(e)})
+        results["status"] = "push_error"
+        return results
+
+    # 6. Vercel deploy
     try:
         result = subprocess.run(
             ["npx", "vercel", "deploy", "--prebuilt", "--prod"],
@@ -970,9 +1055,14 @@ def deploy_site(project_path: str = ".", message: str = "", env_vars: dict = Non
             "status": "ok" if result.returncode == 0 else "error",
             "url": deploy_url
         })
+        if result.returncode != 0:
+            results["status"] = "deploy_failed"
+            return results
         results["deploy_url"] = deploy_url
     except Exception as e:
         results["steps"].append({"step": "deploy", "status": "error", "detail": str(e)})
+        results["status"] = "deploy_error"
+        return results
 
     results["status"] = "deployed"
     return results
@@ -1036,32 +1126,71 @@ def deploy_npm(project_path: str = ".", bump: str = "patch", tag: str = "latest"
     except Exception:
         pass
 
+    # ── Dry-run: simulate without touching the filesystem ──
+    if dry_run:
+        # Compute what the next version would be without actually bumping
+        parts = current_version.split(".")
+        if len(parts) == 3 and bump in ("patch", "minor", "major"):
+            major, minor, patch_v = int(parts[0]), int(parts[1]), int(parts[2])
+            if bump == "patch":
+                patch_v += 1
+            elif bump == "minor":
+                minor += 1
+                patch_v = 0
+            elif bump == "major":
+                major += 1
+                minor = 0
+                patch_v = 0
+            simulated_version = f"{major}.{minor}.{patch_v}"
+        else:
+            simulated_version = current_version
+        results["new_version"] = simulated_version
+        results["steps"].append({"step": "version_bump", "status": "dry_run", "from": current_version, "to": simulated_version, "bump": bump})
+        results["steps"].append({"step": "publish", "status": "dry_run", "tag": tag, "output": f"Would publish {pkg_name}@{simulated_version} with tag {tag}"})
+        results["steps"].append({"step": "verify", "status": "dry_run"})
+        results["status"] = "dry_run_complete"
+        return results
+
     # 4. Version bump
     if bump in ("patch", "minor", "major"):
-        try:
-            bump_cmd = ["npm", "version", bump, "--no-git-tag-version"]
-            result = subprocess.run(
-                bump_cmd, capture_output=True, text=True, timeout=10, cwd=str(p)
-            )
-            if result.returncode == 0:
-                new_version = result.stdout.strip().lstrip("v")
+        if dry_run:
+            try:
+                new_version = _bump_semver(current_version, bump)
                 results["new_version"] = new_version
-                results["steps"].append({"step": "version_bump", "status": "ok", "from": current_version, "to": new_version, "bump": bump})
-            else:
-                results["steps"].append({"step": "version_bump", "status": "error", "detail": result.stderr.strip()[:200]})
+                results["steps"].append({
+                    "step": "version_bump",
+                    "status": "dry_run",
+                    "from": current_version,
+                    "to": new_version,
+                    "bump": bump,
+                })
+            except Exception as e:
+                results["steps"].append({"step": "version_bump", "status": "error", "detail": str(e)})
                 results["status"] = "bump_failed"
                 return results
-        except Exception as e:
-            results["steps"].append({"step": "version_bump", "status": "error", "detail": str(e)})
-            results["status"] = "bump_failed"
-            return results
+        else:
+            try:
+                bump_cmd = ["npm", "version", bump, "--no-git-tag-version"]
+                result = subprocess.run(
+                    bump_cmd, capture_output=True, text=True, timeout=10, cwd=str(p)
+                )
+                if result.returncode == 0:
+                    new_version = result.stdout.strip().lstrip("v")
+                    results["new_version"] = new_version
+                    results["steps"].append({"step": "version_bump", "status": "ok", "from": current_version, "to": new_version, "bump": bump})
+                else:
+                    results["steps"].append({"step": "version_bump", "status": "error", "detail": result.stderr.strip()[:200]})
+                    results["status"] = "bump_failed"
+                    return results
+            except Exception as e:
+                results["steps"].append({"step": "version_bump", "status": "error", "detail": str(e)})
+                results["status"] = "bump_failed"
+                return results
     else:
         results["new_version"] = current_version
 
     # 5. Publish
     publish_cmd = ["npm", "publish", "--tag", tag]
-    if dry_run:
-        publish_cmd.append("--dry-run")
 
     try:
         result = subprocess.run(
@@ -1070,7 +1199,7 @@ def deploy_npm(project_path: str = ".", bump: str = "patch", tag: str = "latest"
         if result.returncode == 0:
             results["steps"].append({
                 "step": "publish",
-                "status": "ok" if not dry_run else "dry_run",
+                "status": "ok",
                 "tag": tag,
                 "output": result.stdout.strip()[-300:]
             })
@@ -1091,27 +1220,26 @@ def deploy_npm(project_path: str = ".", bump: str = "patch", tag: str = "latest"
         results["status"] = "publish_failed"
         return results
 
-    # 6. Verify on registry (skip for dry run)
-    if not dry_run:
-        try:
-            import time
-            time.sleep(2)  # brief wait for registry propagation
-            result = subprocess.run(
-                ["npm", "view", pkg_name, "version"],
-                capture_output=True, text=True, timeout=15
-            )
-            registry_version = result.stdout.strip()
-            verified = registry_version == results.get("new_version", current_version)
-            results["steps"].append({
-                "step": "verify",
-                "status": "ok" if verified else "mismatch",
-                "registry_version": registry_version
-            })
-        except Exception:
-            results["steps"].append({"step": "verify", "status": "skipped"})
+    # 6. Verify on registry
+    try:
+        import time
+        time.sleep(2)  # brief wait for registry propagation
+        result = subprocess.run(
+            ["npm", "view", pkg_name, "version"],
+            capture_output=True, text=True, timeout=15
+        )
+        registry_version = result.stdout.strip()
+        verified = registry_version == results.get("new_version", current_version)
+        results["steps"].append({
+            "step": "verify",
+            "status": "ok" if verified else "mismatch",
+            "registry_version": registry_version
+        })
+    except Exception:
+        results["steps"].append({"step": "verify", "status": "skipped"})
 
     # 7. Git commit the version bump
-    if bump in ("patch", "minor", "major") and not dry_run:
+    if bump in ("patch", "minor", "major"):
         try:
             new_ver = results.get("new_version", current_version)
             subprocess.run(["git", "add", "package.json"], cwd=str(p), timeout=10, capture_output=True)

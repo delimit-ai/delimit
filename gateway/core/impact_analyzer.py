@@ -3,7 +3,7 @@ Delimit Impact Analyzer
 Determines downstream consumers affected by an API change
 and produces informational impact summaries for CI output.
 
-Per Delimit architecture:
+Per Jamsons Doctrine:
 - Impact analysis is INFORMATIONAL ONLY
 - NEVER affects CI pass/fail outcome
 - Deterministic outputs

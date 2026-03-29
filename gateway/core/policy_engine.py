@@ -11,12 +11,16 @@ from pathlib import Path
 
 from core.diff_engine_v2 import OpenAPIDiffEngine, Change, ChangeType
 
+
 class RuleSeverity(Enum):
+    """Severity levels for governance policy rules."""
     ERROR = "error"      # Fails CI
     WARNING = "warning"  # Shows warning but passes
     INFO = "info"        # Informational only
 
+
 class RuleAction(Enum):
+    """Actions to take when a policy rule is triggered."""
     FORBID = "forbid"    # Forbids the change
     ALLOW = "allow"      # Explicitly allows
     WARN = "warn"        # Warns but allows

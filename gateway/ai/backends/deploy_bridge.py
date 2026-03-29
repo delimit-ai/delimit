@@ -106,11 +106,46 @@ def build(app: str, git_ref: Optional[str] = None) -> Dict[str, Any]:
 
 
 def publish(app: str, git_ref: Optional[str] = None) -> Dict[str, Any]:
-    """Update latest plan status to published."""
+    """Update latest plan status to published after basic readiness checks."""
     plans = _list_plans(app=app)
     if not plans:
         return {"error": f"No deploy plans found for {app}"}
     latest = plans[0]
+    current_status = latest.get("status", "unknown")
+    if current_status == "published":
+        return {
+            "app": app,
+            "plan_id": latest["plan_id"],
+            "status": "already_published",
+            "message": f"Latest plan {latest['plan_id']} is already published.",
+        }
+    if current_status == "rolled_back":
+        return {
+            "app": app,
+            "plan_id": latest["plan_id"],
+            "status": "invalid_state",
+            "message": f"Latest plan {latest['plan_id']} was rolled back and cannot be republished.",
+            "current_status": current_status,
+        }
+    if current_status not in {"planned", "built", "verified"}:
+        return {
+            "app": app,
+            "plan_id": latest["plan_id"],
+            "status": "invalid_state",
+            "message": f"Latest plan {latest['plan_id']} is not ready to publish from status '{current_status}'.",
+            "current_status": current_status,
+        }
+
+    build_result = build(app=app, git_ref=git_ref or latest.get("git_ref"))
+    if build_result.get("status") != "ready":
+        return {
+            "app": app,
+            "plan_id": latest["plan_id"],
+            "status": "not_ready",
+            "message": build_result.get("message", "Build prerequisites are not satisfied."),
+            "build_status": build_result.get("status"),
+        }
+
     now = datetime.now(timezone.utc).isoformat()
     latest["status"] = "published"
     latest["updated_at"] = now
@@ -136,11 +171,30 @@ def verify(app: str, env: str, git_ref: Optional[str] = None) -> Dict[str, Any]:
 
 
 def rollback(app: str, env: str, to_sha: Optional[str] = None) -> Dict[str, Any]:
-    """Mark latest plan as rolled back."""
+    """Mark latest published plan as rolled back."""
     plans = _list_plans(app=app, env=env)
     if not plans:
         return {"error": f"No deploy plans found for {app} in {env}"}
     latest = plans[0]
+    current_status = latest.get("status", "unknown")
+    if current_status == "rolled_back":
+        return {
+            "app": app,
+            "env": env,
+            "plan_id": latest["plan_id"],
+            "status": "already_rolled_back",
+            "rolled_back_to": latest.get("rolled_back_to"),
+        }
+    if current_status != "published":
+        return {
+            "app": app,
+            "env": env,
+            "plan_id": latest["plan_id"],
+            "status": "not_ready",
+            "message": f"Cannot roll back plan {latest['plan_id']} from status '{current_status}'. Publish it first.",
+            "current_status": current_status,
+        }
+
     now = datetime.now(timezone.utc).isoformat()
     latest["status"] = "rolled_back"
     latest["updated_at"] = now

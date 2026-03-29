@@ -22,14 +22,30 @@ _NOT_INIT_MSG = (
     "or run the delimit_init tool with your project path."
 )
 
+_DEPENDENCY_MSG = "delimit-os backend is not installed or not available in this environment."
+
+
+def _is_initialized(path: str = ".") -> bool:
+    """A project is initialized if .delimit/policies.yml exists."""
+    return (Path(path).resolve() / ".delimit" / "policies.yml").is_file()
+
 
 def _ensure_os_path():
     if str(OS_PACKAGE) not in sys.path:
         sys.path.insert(0, str(OS_PACKAGE))
 
 
+def _backend_unavailable(path: Optional[str] = None) -> Dict[str, Any]:
+    """Return a truthful error for missing OS backend support."""
+    if path and not _is_initialized(path):
+        return {"error": _NOT_INIT_MSG, "fallback": True}
+    return {"error": _DEPENDENCY_MSG, "fallback": True}
+
+
 def create_plan(operation: str, target: str, parameters: Optional[Dict] = None, require_approval: bool = True) -> Dict[str, Any]:
     """Create an execution plan via delimit-os."""
+    if not OS_PACKAGE.exists():
+        return _backend_unavailable(target)
     _ensure_os_path()
     try:
         from server import PLANS
@@ -54,11 +70,13 @@ def create_plan(operation: str, target: str, parameters: Optional[Dict] = None, 
         PLANS[plan_id] = plan
         return plan
     except ImportError:
-        return {"error": _NOT_INIT_MSG, "fallback": True}
+        return _backend_unavailable(target)
 
 
 def get_status() -> Dict[str, Any]:
     """Get current OS status."""
+    if not OS_PACKAGE.exists():
+        return {"status": "unavailable", "error": _DEPENDENCY_MSG}
     _ensure_os_path()
     try:
         from server import PLANS, TASKS, TOKENS
@@ -69,11 +87,13 @@ def get_status() -> Dict[str, Any]:
             "tokens": len(TOKENS),
         }
     except ImportError:
-        return {"status": "unavailable", "error": _NOT_INIT_MSG}
+        return {"status": "unavailable", "error": _DEPENDENCY_MSG}
 
 
 def check_gates(plan_id: str) -> Dict[str, Any]:
     """Check governance gates for a plan."""
+    if not OS_PACKAGE.exists():
+        return {"error": _DEPENDENCY_MSG}
     _ensure_os_path()
     try:
         from server import PLANS
@@ -86,4 +106,4 @@ def check_gates(plan_id: str) -> Dict[str, Any]:
             "status": plan.get("status"),
         }
     except ImportError:
-        return {"error": _NOT_INIT_MSG}
+        return {"error": _DEPENDENCY_MSG}
