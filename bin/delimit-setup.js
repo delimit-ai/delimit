@@ -312,6 +312,8 @@ async function main() {
     }
     if (fs.existsSync(CODEX_CONFIG)) {
         try {
+            // Fix permissions on existing config
+            fs.chmodSync(CODEX_CONFIG, 0o644);
             let toml = fs.readFileSync(CODEX_CONFIG, 'utf-8');
             if (toml.includes('[mcp_servers.delimit]')) {
                 await logp(`  ${green('✓')} Delimit already in Codex config`);
