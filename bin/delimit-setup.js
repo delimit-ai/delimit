@@ -80,7 +80,8 @@ async function main() {
     log(magenta('  / / / / __/ / /    / // /|_/ // /  / /   '));
     log(magenta(' / /_/ / /___/ /____/ // /  / // /  / /    '));
     log(orange('/_____/_____/_____/___/_/  /_/___/ /_/     '));
-    log(dim('  delimit.ai'));
+    const _pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
+    log(dim(`  v${_pkg.version}`));
     log('');
 
     // Step 1: Check prerequisites
@@ -618,7 +619,7 @@ printf "  \${PURPLE}\${BOLD}   / __ \\\\/ ____/ /   /  _/  |/  /  _/_  __/\${RES
 printf "  \${MAGENTA}\${BOLD}  / / / / __/ / /    / // /|_/ // /  / /   \${RESET}\\n"
 printf "  \${MAGENTA}\${BOLD} / /_/ / /___/ /____/ // /  / // /  / /    \${RESET}\\n"
 printf "  \${ORANGE}\${BOLD}/_____/_____/_____/___/_/  /_/___/ /_/     \${RESET}\\n"
-printf "  \${DIM}delimit.ai\${RESET}\\n"
+printf "  \${DIM}v${pkg.version}\${RESET}\\n"
 echo ""
 printf "  \${PURPLE}\${BOLD}[Delimit]\${RESET} \${DIM}Executing governance check...\${RESET}\\n"
 sleep 0.1
@@ -839,8 +840,62 @@ exit 127
     }
     log('');
 
-    // Step 11: Done
-    step(11, 'Done!');
+    // Step 11: Social target scanning config
+    step(11, 'Configuring social target scanner...');
+
+    const socialConfigPath = path.join(DELIMIT_HOME, 'social_target_config.json');
+    const socialDefaultConfig = {
+        platforms: {
+            x: { enabled: true, provider: 'twttr241' },
+            reddit: { enabled: true, provider: 'proxy' },
+            github: { enabled: true, provider: 'gh_cli' },
+            hn: { enabled: true, provider: 'algolia' },
+            devto: { enabled: true, provider: 'public_api' },
+            namepros: { enabled: false, provider: 'manual' },
+        },
+        subreddits: {},
+        github_queries: {},
+        scan_limit: 10,
+        min_engagement: { score: 1, comments: 2 },
+    };
+
+    if (!fs.existsSync(socialConfigPath)) {
+        fs.mkdirSync(path.dirname(socialConfigPath), { recursive: true });
+        fs.writeFileSync(socialConfigPath, JSON.stringify(socialDefaultConfig, null, 2) + '\n');
+        log(`  ${green('\u2713')} Created ${dim(socialConfigPath)}`);
+    } else {
+        log(`  ${dim('  Config already exists:')} ${socialConfigPath}`);
+    }
+
+    // Auto-detect available platforms
+    const detectedPlatforms = {};
+    // HN and Dev.to are always available (public APIs)
+    detectedPlatforms['hn'] = 'available (public API)';
+    detectedPlatforms['devto'] = 'available (public API)';
+    // GitHub: check gh CLI
+    try {
+        execSync('gh auth status', { stdio: 'pipe', timeout: 10000 });
+        detectedPlatforms['github'] = 'available (gh authenticated)';
+    } catch {
+        detectedPlatforms['github'] = 'unavailable (gh not authenticated)';
+    }
+    // X: check for RapidAPI key in env
+    if (process.env.RAPIDAPI_KEY) {
+        detectedPlatforms['x'] = 'available (RapidAPI key in env)';
+    } else if (process.env.XAI_API_KEY) {
+        detectedPlatforms['x'] = 'available (xAI key in env, fallback)';
+    } else {
+        detectedPlatforms['x'] = 'unavailable (no API key)';
+    }
+
+    for (const [plat, status] of Object.entries(detectedPlatforms)) {
+        const icon = status.startsWith('available') ? green('\u2713') : yellow('\u2717');
+        log(`  ${icon} ${plat}: ${dim(status)}`);
+    }
+    log('');
+
+    // Step 12: Done
+    step(12, 'Done!');
     log('');
     log(`  ${green('Delimit is installed.')} Your AI now has persistent memory and governance.`);
     log('');
@@ -872,88 +927,8 @@ exit 127
     log('');
 }
 
-function getDelimitSection() {
-    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
-    const version = pkg.version || '0.0.0';
-    return `<!-- delimit:start v${version} -->
-# Delimit
-
-Unify all AI coding assistants with persistent context, governance, and multi-model debate.
-
-## Auto-Trigger Rules (Consensus 123)
-
-These rules fire automatically. The AI MUST call the specified tools without asking permission.
-The founder reviews and approves via email. The AI's job is to draft, send, and chain — not to ask.
-
-### Session Lifecycle
-- **Session start**: call \`delimit_ledger_context\` + \`delimit_gov_health\` + \`delimit_inbox_daemon(action="start")\` + \`delimit_notify_routing(action="status")\`
-- **Session end or idle**: call \`delimit_session_handoff\` to preserve context for next session
-- If returning user, summarize what's pending. If new project, call \`delimit_scan\`.
-
-### Code Development (debounced per edit batch)
-- After editing UI/CSS: call \`delimit_design_validate_responsive\`
-- After editing API specs: call \`delimit_lint\` + \`delimit_drift_check\`
-- After editing tests: call \`delimit_test_smoke\`
-- After any significant code change: call \`delimit_test_smoke\` if applicable tests exist
-
-### Pre-Commit / Pre-Deploy Gates
-- Before \`git commit\`: call \`delimit_repo_diagnose\`
-- Deploy requested: \`delimit_security_audit\` then \`delimit_test_smoke\` then \`delimit_changelog\` then \`delimit_deploy_plan\`
-- Deploy succeeds: \`delimit_deploy_verify\` + \`delimit_evidence_collect\`
-- Verify succeeds: \`delimit_ledger_done\` (related task) + \`delimit_notify\`
-
-### Content / Outreach (all drafts, never auto-post)
-- Social content drafted: ALWAYS call \`delimit_social_post\` or \`delimit_notify\` immediately
-- \`delimit_social_target\` scan completes: call \`delimit_notify\` with target summary
-- Screenshot of social thread shared: auto-draft reply + call \`delimit_notify\`
-- During ANY social interaction: scan for competitive signals, integration opportunities, and strategic items. Add to strategy ledger if significant.
-
-### Strategic / Business Operations
-- Strategic opportunity identified: call \`delimit_ledger_add\` immediately
-- \`delimit_ledger_add\` fires (non-P0): \`delimit_notify\` (batched, 15-min digest)
-- \`delimit_ledger_add\` fires (P0): \`delimit_notify\` (immediate) + \`delimit_agent_dispatch\`
-- Conflicting high-severity signals: call \`delimit_deliberate\` for multi-model consensus
-
-### Monitoring / Sensors
-- GitHub issue state change (closed, merged, labeled): \`delimit_ledger_update\` + \`delimit_notify\` (immediate)
-- GitHub issue new comments: \`delimit_ledger_update\` + \`delimit_notify\` (batched digest)
-- \`delimit_drift_check\` finds drift: \`delimit_ledger_add\` + \`delimit_notify\`
-
-### Approval Loop (Email Control Plane)
-- Approval email detected: execute the approved action based on context
-- Rejection email detected: \`delimit_ledger_update\` (mark rejected)
-
-### Audit Trail
-- After security audit, test run, or deploy: call \`delimit_evidence_collect\`
-- Any gate failure: \`delimit_evidence_collect\` + \`delimit_ledger_add\` + \`delimit_notify\` (immediate)
-
-### Storm Prevention
-- Edit triggers: debounce to once per assistant turn
-- Non-P0 notifications: batch into 15-minute digests
-- Max 5 immediate notifications per hour (overflow to digest)
-- Per-scan fan-out: max 10 targets per notification
-
-## What Delimit does:
-- **API governance** -- lint, diff, semver classification, migration guides
-- **Persistent context** -- memory and ledger survive across sessions and models
-- **Security audit** -- dependency scanning, secret detection
-- **Test verification** -- confirm tests actually ran, measure coverage
-- **Multi-model deliberation** -- consensus from multiple AI models (3 free, then BYOK)
-
-## GitHub Action
-Add breaking change detection to any repo:
-\`\`\`yaml
-- uses: delimit-ai/delimit-action@v1
-  with:
-    spec: api/openapi.yaml
-\`\`\`
-
-## Links
-- Docs: https://delimit.ai/docs
-- GitHub: https://github.com/delimit-ai/delimit-mcp-server
-- Action: https://github.com/marketplace/actions/delimit-api-governance
-<!-- delimit:end -->`;
-}
+// LED-213: Import canonical template from shared module
+const { getDelimitSection } = require('../lib/delimit-template');
 
 function getClaudeMdContent() {
     return getDelimitSection() + '\n';
