@@ -1,7 +1,7 @@
 """
 Delimit Event Schema
 Canonical event schema for API contract evolution tracking.
-Deterministic validation and serialization per Delimit architecture.
+Deterministic validation and serialization per Jamsons Doctrine.
 """
 
 import hashlib

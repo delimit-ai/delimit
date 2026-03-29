@@ -28,10 +28,10 @@ DEFAULT_CONFIG = {
     "urls": {
         "homepage": "https://delimit.ai",
         "docs": "https://delimit.ai/docs",
-        "github": "https://github.com/delimit-ai/delimit",
+        "github": "https://github.com/delimit-ai/delimit-mcp-server",
         "action": "https://github.com/marketplace/actions/delimit-api-governance",
         "npm": "https://www.npmjs.com/package/delimit-cli",
-        "quickstart": "https://github.com/delimit-ai/delimit-quickstart",
+        "quickstart": "https://github.com/delimit-ai/delimit-mcp-server-quickstart",
     },
 }
 

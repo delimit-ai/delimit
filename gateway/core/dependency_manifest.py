@@ -2,7 +2,7 @@
 Delimit Dependency Manifest
 Parses and validates .delimit/dependencies.yaml service dependency declarations.
 
-Per Delimit architecture:
+Per Jamsons Doctrine:
 - Deterministic outputs
 - No credential discovery
 - No telemetry

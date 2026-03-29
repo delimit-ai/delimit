@@ -9,6 +9,7 @@ Adapter Boundary Contract v1.0:
 """
 
 import sys
+import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -23,7 +24,6 @@ if str(GATEWAY_ROOT) not in sys.path:
 
 def _load_specs(spec_path: str) -> Dict[str, Any]:
     """Load an OpenAPI spec from a file path."""
-    import json
     import yaml
 
     p = Path(spec_path)
@@ -34,6 +34,55 @@ def _load_specs(spec_path: str) -> Dict[str, Any]:
     if p.suffix in (".yaml", ".yml"):
         return yaml.safe_load(content)
     return json.loads(content)
+
+
+def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
+    """Read JSONL entries from a file, skipping malformed lines."""
+    items: List[Dict[str, Any]] = []
+    if not path.exists():
+        return items
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    payload = json.loads(stripped)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(payload, dict):
+                    items.append(payload)
+    except OSError:
+        return []
+    return items
+
+
+def _query_project_ledger_fallback(ledger_path: Path) -> Optional[Dict[str, Any]]:
+    """Fallback for project-local ledgers that use operations/strategy jsonl files."""
+    if ledger_path.name != "events.jsonl":
+        return None
+
+    ledger_dir = ledger_path.parent
+    operations = _read_jsonl(ledger_dir / "operations.jsonl")
+    strategy = _read_jsonl(ledger_dir / "strategy.jsonl")
+    combined = operations + strategy
+    if not combined:
+        return None
+
+    latest = combined[-1]
+    return {
+        "path": str(ledger_path),
+        "event_count": len(combined),
+        "latest_event": latest,
+        "storage_mode": "project_local_ledger",
+        "ledger_files": [
+            str(p)
+            for p in (ledger_dir / "operations.jsonl", ledger_dir / "strategy.jsonl")
+            if p.exists()
+        ],
+        "chain_valid": True,
+    }
 
 
 def run_lint(old_spec: str, new_spec: str, policy_file: Optional[str] = None) -> Dict[str, Any]:
@@ -78,6 +127,160 @@ def run_diff(old_spec: str, new_spec: str) -> Dict[str, Any]:
     }
 
 
+def run_changelog(
+    old_spec: str,
+    new_spec: str,
+    fmt: str = "markdown",
+    version: str = "",
+) -> Dict[str, Any]:
+    """Generate a changelog from API spec changes.
+
+    Uses the diff engine to detect changes, then formats them into
+    a human-readable changelog grouped by category.
+    """
+    from core.diff_engine_v2 import OpenAPIDiffEngine
+    from datetime import datetime, timezone
+
+    old = _load_specs(old_spec)
+    new = _load_specs(new_spec)
+
+    engine = OpenAPIDiffEngine()
+    changes = engine.compare(old, new)
+
+    # Categorize changes
+    breaking = []
+    features = []
+    deprecations = []
+    fixes = []
+
+    for c in changes:
+        entry = {
+            "type": c.type.value,
+            "path": c.path,
+            "message": c.message,
+            "is_breaking": c.is_breaking,
+        }
+        if c.type.value == "deprecated_added":
+            deprecations.append(entry)
+        elif c.is_breaking:
+            breaking.append(entry)
+        elif c.type.value in (
+            "endpoint_added", "method_added", "optional_param_added",
+            "response_added", "optional_field_added", "enum_value_added",
+            "security_added",
+        ):
+            features.append(entry)
+        else:
+            fixes.append(entry)
+
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    version_label = version or "Unreleased"
+
+    if fmt == "json":
+        return {
+            "format": "json",
+            "version": version_label,
+            "date": date_str,
+            "total_changes": len(changes),
+            "sections": {
+                "breaking_changes": breaking,
+                "new_features": features,
+                "deprecations": deprecations,
+                "other_changes": fixes,
+            },
+        }
+
+    if fmt == "keepachangelog":
+        lines = [f"## [{version_label}] - {date_str}", ""]
+        if breaking:
+            lines.append("### Removed / Breaking")
+            for e in breaking:
+                lines.append(f"- {e['message']} (`{e['path']}`)")
+            lines.append("")
+        if features:
+            lines.append("### Added")
+            for e in features:
+                lines.append(f"- {e['message']} (`{e['path']}`)")
+            lines.append("")
+        if deprecations:
+            lines.append("### Deprecated")
+            for e in deprecations:
+                lines.append(f"- {e['message']} (`{e['path']}`)")
+            lines.append("")
+        if fixes:
+            lines.append("### Changed")
+            for e in fixes:
+                lines.append(f"- {e['message']} (`{e['path']}`)")
+            lines.append("")
+        return {
+            "format": "keepachangelog",
+            "version": version_label,
+            "date": date_str,
+            "total_changes": len(changes),
+            "changelog": "\n".join(lines),
+        }
+
+    if fmt == "github-release":
+        lines = []
+        if breaking:
+            lines.append("## :warning: Breaking Changes")
+            for e in breaking:
+                lines.append(f"- {e['message']} (`{e['path']}`)")
+            lines.append("")
+        if features:
+            lines.append("## :rocket: New Features")
+            for e in features:
+                lines.append(f"- {e['message']} (`{e['path']}`)")
+            lines.append("")
+        if deprecations:
+            lines.append("## :no_entry_sign: Deprecations")
+            for e in deprecations:
+                lines.append(f"- {e['message']} (`{e['path']}`)")
+            lines.append("")
+        if fixes:
+            lines.append("## :wrench: Other Changes")
+            for e in fixes:
+                lines.append(f"- {e['message']} (`{e['path']}`)")
+            lines.append("")
+        return {
+            "format": "github-release",
+            "version": version_label,
+            "date": date_str,
+            "total_changes": len(changes),
+            "changelog": "\n".join(lines),
+        }
+
+    # Default: markdown
+    lines = [f"# Changelog — {version_label} ({date_str})", ""]
+    if breaking:
+        lines.append("## Breaking Changes")
+        for e in breaking:
+            lines.append(f"- **{e['type']}**: {e['message']} (`{e['path']}`)")
+        lines.append("")
+    if features:
+        lines.append("## New Features")
+        for e in features:
+            lines.append(f"- **{e['type']}**: {e['message']} (`{e['path']}`)")
+        lines.append("")
+    if deprecations:
+        lines.append("## Deprecations")
+        for e in deprecations:
+            lines.append(f"- **{e['type']}**: {e['message']} (`{e['path']}`)")
+        lines.append("")
+    if fixes:
+        lines.append("## Other Changes")
+        for e in fixes:
+            lines.append(f"- **{e['type']}**: {e['message']} (`{e['path']}`)")
+        lines.append("")
+    return {
+        "format": "markdown",
+        "version": version_label,
+        "date": date_str,
+        "total_changes": len(changes),
+        "changelog": "\n".join(lines),
+    }
+
+
 def run_policy(spec_files: List[str], policy_file: Optional[str] = None) -> Dict[str, Any]:
     """Evaluate specs against governance policy without diffing."""
     from core.policy_engine import PolicyEngine
@@ -107,6 +310,14 @@ def query_ledger(
         return {"error": "Ledger not found", "path": ledger_path}
 
     result: Dict[str, Any] = {"path": ledger_path, "event_count": ledger.get_event_count()}
+    if result["event_count"] == 0:
+        fallback = _query_project_ledger_fallback(Path(ledger_path))
+        if fallback:
+            if api_name:
+                fallback["events"] = [e for e in _read_jsonl(Path(ledger_path).parent / "operations.jsonl") + _read_jsonl(Path(ledger_path).parent / "strategy.jsonl") if e.get("api_name") == api_name]
+            elif repository:
+                fallback["events"] = [e for e in _read_jsonl(Path(ledger_path).parent / "operations.jsonl") + _read_jsonl(Path(ledger_path).parent / "strategy.jsonl") if e.get("repository") == repository]
+            return fallback
 
     if validate_chain:
         try:

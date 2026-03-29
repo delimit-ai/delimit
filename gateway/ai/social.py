@@ -28,25 +28,82 @@ ACCOUNTS_FILE = SECRETS_DIR / "twitter-accounts.json"
 PLATFORM_TONE = {
     "twitter": {
         "max_length": 280,
-        "tone": "concise, technical, value-first",
+        "tone": "confident technical brand, direct, professional",
+        "identity": "@delimit_ai — verified, professional account",
+        "conversion_targets": [
+            "action: delimit-ai/delimit-action (GitHub Marketplace)",
+            "mcp: delimit-mcp-server (Claude Code, Cursor, Gemini CLI)",
+            "vscode: Delimit VS Code extension (Marketplace)",
+            "install: npx delimit-cli setup",
+        ],
         "rules": [
+            "ALWAYS POSITIVE — celebrate wins, share progress, show momentum. Never complain, never air gaps or insecurities publicly",
+            "Frame every metric as a win: '400 clones in 2 weeks' NOT '400 clones but 0 stars'",
+            "If there's a problem to solve, handle it internally — don't tweet about it",
+            "Confident technical brand voice — direct, clear, authoritative",
+            "NOT a Reddit voice — no rough edges, no typos, no 'typing on phone' energy",
+            "Proper capitalization and punctuation — we're a product account",
             "Lead with the insight, not the product",
             "One clear point per tweet",
+            "No em dashes or en dashes — most people can't type them, so they look AI-generated. Use commas, periods, or hyphens instead",
+            "Short punchy lines with line breaks for rhythm",
             "Include a link or install command when relevant",
+            "Quote tweets: position Delimit relative to the quoted content, not as a generic response",
+            "Replies: be genuinely helpful or insightful, not just 'cool project!'",
         ],
     },
     "reddit": {
         "max_length": 500,
-        "tone": "casual, opinionated, human",
+        "tone": "proud builder, genuinely helpful, never salesy",
+        "identity": "u/delimitdev — we're openly building Delimit, not hiding it",
+        "conversion_targets": [
+            "action: delimit-ai/delimit-action (GitHub Marketplace)",
+            "mcp: delimit-mcp-server (Claude Code, Cursor, Gemini CLI)",
+            "vscode: Delimit VS Code extension (Marketplace)",
+        ],
+        "subreddit_angles": {
+            "r/vibecoding": {
+                "angle": "founder was a non-technical vibe coder who kept breaking things — built Delimit as the safety net",
+                "narrative": "'I was in your shoes' — fellow builder sharing what they made, not selling",
+                "best_for": "threads about stability, breaking things, fear of AI-introduced bugs, QA loops",
+                "conversion": "action or vscode",
+            },
+            "r/ClaudeAI": {
+                "angle": "MCP power user — shared context across models, agent governance",
+                "narrative": "deep practitioner who's built tooling on top of Claude's ecosystem",
+                "best_for": "threads about MCP, multi-model workflows, context loss, agent tooling",
+                "conversion": "mcp",
+            },
+            "r/devops": {
+                "angle": "CI/CD governance — catch breaking API changes before merge",
+                "narrative": "team that ships a GitHub Action for API compatibility checks",
+                "best_for": "threads about API versioning, breaking changes, CI pipelines, OpenAPI",
+                "conversion": "action",
+            },
+            "r/programming": {
+                "angle": "developer tooling builder — 27 breaking change types, one YAML line",
+                "narrative": "technical founder sharing what the engine detects and why",
+                "best_for": "threads about API design, backward compatibility, schema evolution",
+                "conversion": "action",
+            },
+        },
         "rules": [
+            "We post as u/delimitdev — no need to hide that we build Delimit",
+            "Mention Delimit ONLY when it genuinely helps the person's problem",
+            "Be proud of our work, not promotional — 'we built X to solve this' not 'check out X!'",
+            "NEVER post unsolicited promos — only mention our tools in direct response to a real problem",
+            "If Delimit isn't relevant to the thread, just be helpful with no mention at all",
+            "Confident builder energy — proud of what we've shipped, not cocky or boastful",
             "NEVER use bullet points or numbered lists — instant AI tell",
             "Keep it to 2-3 sentences max, not multi-paragraph essays",
             "Write like you're typing on your phone, not writing a blog post",
-            "Be opinionated — 'honestly X drives me nuts' not 'X is a known issue'",
             "Use contractions, sentence fragments, rough edges",
             "One sharp point per comment — don't cover three topics",
-            "Personal experience framing — 'we hit this exact problem' not 'teams often encounter'",
+            "ALWAYS POSITIVE — celebrate wins, share progress, show momentum. Never complain or air gaps publicly",
+            "NEVER commiserate or self-deprecate — sound like someone who's figured it out",
             "A typo or two is fine — too polished = flagged as AI by mods",
+            "NEVER use em dashes (—), en dashes (–), or fancy punctuation — use commas, 'and', or hyphens instead",
+            "NEVER use semicolons, ellipsis (…), or curly quotes — type like a human on a phone keyboard",
             "NEVER structure responses with headers, bold text, or formatted lists",
             "r/devops mods actively flag LLM-generated content (learned 2026-03-27)",
         ],
@@ -278,8 +335,16 @@ def generate_post(category: str = "", custom: str = "") -> dict:
     return {"text": text, "category": category}
 
 
-def get_post_history(limit: int = 20) -> list:
-    """Get recent post history from the JSONL log."""
+def get_post_history(limit: int = 20, platform: str = "",
+                     user: str = "", subreddit: str = "") -> list:
+    """Get recent post history from the JSONL log.
+
+    Args:
+        limit: Max entries to return.
+        platform: Filter by platform (e.g. "twitter", "reddit").
+        user: Filter by Reddit user we replied to (replying_to_user field).
+        subreddit: Filter by subreddit (e.g. "r/vibecoding").
+    """
     if not SOCIAL_LOG.exists():
         return []
     posts = []
@@ -287,29 +352,55 @@ def get_post_history(limit: int = 20) -> list:
         if not line.strip():
             continue
         try:
-            posts.append(json.loads(line))
+            entry = json.loads(line)
         except (json.JSONDecodeError, ValueError):
-            pass
+            continue
+        # Apply filters
+        if platform and entry.get("platform") != platform:
+            continue
+        if user and user.lower() not in (entry.get("replying_to_user") or "").lower():
+            continue
+        if subreddit and subreddit.lower() not in (entry.get("subreddit") or "").lower():
+            continue
+        posts.append(entry)
         if len(posts) >= limit:
             break
     return posts
 
 
 def log_post(platform: str, text: str, post_id: str = "", handle: str = "",
-             quote_tweet_id: str = "", reply_to_id: str = ""):
-    """Log a social media post to the JSONL log."""
+             quote_tweet_id: str = "", reply_to_id: str = "",
+             subreddit: str = "", thread_url: str = "",
+             thread_title: str = "", replying_to_user: str = "",
+             conversion_target: str = ""):
+    """Log a social media post to the JSONL log.
+
+    For Reddit comments, include subreddit, thread context, and the user
+    being replied to so we can recall full conversation threads later.
+    """
     SOCIAL_LOG.parent.mkdir(parents=True, exist_ok=True)
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "platform": platform,
         "handle": handle,
-        "text": text[:200],
+        "text": text[:500] if platform == "reddit" else text[:200],
         "post_id": post_id,
     }
     if quote_tweet_id:
         entry["quote_tweet_id"] = quote_tweet_id
     if reply_to_id:
         entry["reply_to_id"] = reply_to_id
+    # Reddit-specific fields
+    if subreddit:
+        entry["subreddit"] = subreddit
+    if thread_url:
+        entry["thread_url"] = thread_url
+    if thread_title:
+        entry["thread_title"] = thread_title
+    if replying_to_user:
+        entry["replying_to_user"] = replying_to_user
+    if conversion_target:
+        entry["conversion_target"] = conversion_target
     with open(SOCIAL_LOG, "a") as f:
         f.write(json.dumps(entry) + "\n")
 
@@ -355,10 +446,17 @@ def get_platform_tone(platform: str = "twitter") -> dict:
 
 
 def save_draft(text: str, platform: str = "twitter", account: str = "",
-               quote_tweet_id: str = "", reply_to_id: str = "") -> dict:
+               quote_tweet_id: str = "", reply_to_id: str = "",
+               conversion_target: str = "", thread_url: str = "",
+               context: str = "") -> dict:
     """Save a social media post as a draft for later approval.
 
     Returns the draft entry with a unique draft_id and platform tone guidelines.
+
+    Args:
+        conversion_target: For Reddit — "action", "mcp", "vscode", or "" (no promo, just helpful).
+        thread_url: URL of the Reddit thread being replied to.
+        context: WHY this post should be made — strategic reasoning shown in the email.
     """
     DRAFTS_FILE.parent.mkdir(parents=True, exist_ok=True)
     draft_id = uuid.uuid4().hex[:12]
@@ -370,6 +468,9 @@ def save_draft(text: str, platform: str = "twitter", account: str = "",
         "account": account,
         "quote_tweet_id": quote_tweet_id,
         "reply_to_id": reply_to_id,
+        "conversion_target": conversion_target,
+        "thread_url": thread_url,
+        "context": context,
         "status": "pending",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
@@ -377,6 +478,32 @@ def save_draft(text: str, platform: str = "twitter", account: str = "",
     warnings = []
     if tone.get("max_length") and len(text) > tone["max_length"]:
         warnings.append(f"Text exceeds {platform} max length ({len(text)}/{tone['max_length']})")
+    # Fancy AI punctuation checks — applies to ALL platforms
+    # Most people can't type em dashes, curly quotes, etc. on a keyboard, so they look AI-generated
+    _fancy_chars = {
+        "\u2014": "em dash",
+        "\u2013": "en dash",
+        "\u2026": "ellipsis (...)",
+        "\u201c": "curly left quote",
+        "\u201d": "curly right quote",
+        "\u2018": "curly left single quote",
+        "\u2019": "curly right single quote",
+    }
+    _found_fancy = [name for char, name in _fancy_chars.items() if char in text]
+    if _found_fancy:
+        warnings.append(f"AI TELL WARNING: Fancy punctuation detected: {', '.join(_found_fancy)} — use plain keyboard characters only")
+    # Negativity check — applies to ALL platforms
+    _lower_text = text.lower()
+    _negative_patterns = [
+        "zero stars", "no stars", "0 stars", "nobody cared",
+        "no one noticed", "nobody noticed", "crickets",
+        "the challenge is", "the problem is", "the hard part is",
+        "but zero", "but no one", "but nobody",
+        "struggling to", "failing to", "can't seem to",
+        "not working", "isn't working",
+    ]
+    if any(p in _lower_text for p in _negative_patterns):
+        warnings.append("NEGATIVITY WARNING: Post sounds negative or self-defeating. Reframe as a win or celebration. If there's a problem, handle it internally — don't tweet about it.")
     if platform == "reddit":
         if any(line.strip().startswith(("- ", "* ", "1.", "2.", "3.")) for line in text.split("\n")):
             warnings.append("REDDIT WARNING: Contains bullet/numbered lists — high risk of mod removal as AI content")
@@ -384,6 +511,30 @@ def save_draft(text: str, platform: str = "twitter", account: str = "",
             warnings.append("REDDIT WARNING: Multi-paragraph essay format — shorten to 2-3 sentences")
         if "**" in text:
             warnings.append("REDDIT WARNING: Contains bold formatting — too polished for Reddit")
+        if ";" in text:
+            warnings.append("REDDIT WARNING: Contains semicolon — too formal, use a comma or period instead")
+        # Self-deprecating / commiserating tone check
+        _lower = text.lower()
+        _commiserate_patterns = [
+            "same issue here", "i've been hitting", "i struggle with",
+            "yeah i have this", "me too", "same problem",
+            "i've been dealing with", "drives me nuts too",
+            "i'm stuck on", "can't figure out", "been struggling",
+        ]
+        if any(p in _lower for p in _commiserate_patterns):
+            warnings.append("REDDIT WARNING: Self-deprecating/commiserating tone detected — rewrite with confident practitioner voice")
+        # Unsolicited promo check — mention Delimit only when genuinely helpful
+        _promo_patterns = [
+            "check out", "you should try", "give it a try",
+            "we just launched", "just shipped", "shameless plug",
+            "i'd recommend delimit", "you need delimit",
+        ]
+        _mentions_delimit = "delimit" in _lower
+        _is_salesy = any(p in _lower for p in _promo_patterns)
+        if _mentions_delimit and _is_salesy:
+            warnings.append("REDDIT WARNING: Looks like an unsolicited promo — mention Delimit only in direct response to a real problem, never as a pitch")
+        if _mentions_delimit and not conversion_target:
+            warnings.append("REDDIT NOTE: Mentions Delimit but no conversion_target set — specify 'action', 'mcp', or 'vscode' so the email shows the funnel intent")
     if warnings:
         entry["tone_warnings"] = warnings
     with open(DRAFTS_FILE, "a") as f:
@@ -454,7 +605,10 @@ def _load_all_drafts() -> list[dict]:
 
 
 def approve_draft(draft_id: str) -> dict:
-    """Approve a draft and post it. Returns the post result."""
+    """Approve a draft — marks it approved and emails the final text to the founder.
+
+    Auto-posting via Twitter API is disabled. Founder posts manually from their device.
+    """
     all_entries = _load_all_drafts()
     target = None
     for entry in all_entries:
@@ -466,23 +620,31 @@ def approve_draft(draft_id: str) -> dict:
     if target.get("status") != "pending":
         return {"error": f"Draft '{draft_id}' is already {target.get('status')}"}
 
-    # Post it
-    result = post_tweet(
-        target["text"],
-        account=target.get("account", ""),
-        quote_tweet_id=target.get("quote_tweet_id", ""),
-        reply_to_id=target.get("reply_to_id", ""),
-    )
-
-    if "error" in result:
-        return result
-
-    # Update status
+    # Mark approved but do NOT auto-post — email to founder for manual posting
     target["status"] = "approved"
     target["approved_at"] = datetime.now(timezone.utc).isoformat()
-    target["post_result"] = result
     _rewrite_drafts(all_entries)
-    return {"draft_id": draft_id, "status": "approved", "post_result": result}
+
+    # Email the approved text for manual posting
+    try:
+        from ai.notify import send_email
+        qt = target.get("quote_tweet_id", "")
+        rt = target.get("reply_to_id", "")
+        context_lines = []
+        if qt:
+            context_lines.append(f"Quote tweet: https://x.com/i/status/{qt}")
+        if rt:
+            context_lines.append(f"Reply to: https://x.com/i/status/{rt}")
+        context = "\n".join(context_lines)
+        body = f"APPROVED — post this manually:\n\n---\n{target['text']}\n---\n\n{context}"
+        send_email(
+            subject=f"APPROVED X Post: {draft_id}",
+            body=body,
+        )
+    except Exception:
+        pass
+
+    return {"draft_id": draft_id, "status": "approved", "mode": "manual_post", "message": "Emailed to founder for manual posting. Auto-posting is disabled."}
 
 
 def reject_draft(draft_id: str) -> dict:

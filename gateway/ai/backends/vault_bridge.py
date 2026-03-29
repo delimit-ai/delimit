@@ -1,130 +1,85 @@
 """
-Bridge to delimit-vault package.
-Tier 2 Platform tools — artifact and credential storage.
+Vault bridge — file-based artifact and snapshot storage.
+Stores vault entries as JSON files in ~/.delimit/vault/.
 """
 
-import os
-import sys
 import json
-import asyncio
+import hashlib
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
-from .async_utils import run_async
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("delimit.ai.vault_bridge")
 
-VAULT_PACKAGE = Path(os.environ.get("DELIMIT_HOME", str(Path.home() / ".delimit"))) / "server" / "packages" / "delimit-vault"
-
-_server = None
+VAULT_DIR = Path.home() / ".delimit" / "vault"
 
 
-def _get_server():
-    """Return the vault server instance (lazy — no async init here).
-
-    The Qdrant client uses aiohttp which is bound to the event loop it was
-    created on.  ``run_async`` creates a *new* loop per call, so we must NOT
-    call ``_initialize_clients()`` here.  Instead each bridge method calls
-    ``_ensure_initialized()`` inside the *same* ``run_async`` invocation that
-    performs the actual operation, keeping the aiohttp session alive for the
-    duration of the request.
-    """
-    global _server
-    if _server is not None:
-        return _server
-    pkg_path = str(VAULT_PACKAGE / "delimit_vault_mcp")
-    if pkg_path not in sys.path:
-        sys.path.insert(0, pkg_path)
-    if str(VAULT_PACKAGE) not in sys.path:
-        sys.path.insert(0, str(VAULT_PACKAGE))
-    try:
-        from delimit_vault_mcp.server import DelimitVaultServer
-        _server = DelimitVaultServer()
-        return _server
-    except Exception as e:
-        logger.warning(f"Failed to init vault server: {e}")
-        return None
-
-
-async def _ensure_initialized(srv):
-    """(Re-)initialize Qdrant client on the *current* event loop.
-
-    Because ``run_async`` may create a fresh event loop for each bridge call,
-    the previous aiohttp session becomes invalid.  We unconditionally
-    re-initialize to bind the session to the current loop.
-    """
-    await srv._initialize_clients()
-
-
-def _extract_text(result) -> Dict[str, Any]:
-    """Extract text from MCP TextContent objects or raw results."""
-    if isinstance(result, str):
-        try:
-            return json.loads(result)
-        except json.JSONDecodeError:
-            return {"result": result}
-    if isinstance(result, dict):
-        return result
-    if isinstance(result, list):
-        # Handle list of TextContent objects
-        texts = []
-        for item in result:
-            if hasattr(item, "text"):
-                try:
-                    texts.append(json.loads(item.text))
-                except (json.JSONDecodeError, TypeError):
-                    texts.append({"text": str(item.text)})
-            else:
-                texts.append(str(item))
-        return texts[0] if len(texts) == 1 else {"results": texts}
-    if hasattr(result, "text"):
-        try:
-            return json.loads(result.text)
-        except (json.JSONDecodeError, TypeError):
-            return {"text": str(result.text)}
-    return {"result": str(result)}
+def _ensure_dir():
+    VAULT_DIR.mkdir(parents=True, exist_ok=True)
+    (VAULT_DIR / "snapshots").mkdir(exist_ok=True)
+    (VAULT_DIR / "entries").mkdir(exist_ok=True)
 
 
 def search(query: str) -> Dict[str, Any]:
-    """Search vault entries."""
-    srv = _get_server()
-    if srv is None:
-        return {"error": "Vault server unavailable", "results": []}
-    try:
-        async def _do():
-            await _ensure_initialized(srv)
-            return await srv._handle_search({"query": query})
-        result = run_async(_do())
-        return _extract_text(result)
-    except Exception as e:
-        return {"error": f"Vault search failed: {e}", "results": []}
+    """Search vault entries by keyword."""
+    _ensure_dir()
+    query_lower = query.lower()
+    results = []
+
+    for f in sorted((VAULT_DIR / "entries").glob("*.json"), reverse=True):
+        try:
+            entry = json.loads(f.read_text())
+            content = json.dumps(entry).lower()
+            if query_lower in content:
+                results.append({
+                    "id": entry.get("id", f.stem),
+                    "title": entry.get("title", f.stem),
+                    "type": entry.get("type", "unknown"),
+                    "created_at": entry.get("created_at", ""),
+                    "preview": str(entry.get("content", ""))[:200],
+                })
+            if len(results) >= 10:
+                break
+        except Exception:
+            pass
+
+    return {"query": query, "results": results, "count": len(results)}
+
+
+def snapshot(task_id: str = "vault-snapshot") -> Dict[str, Any]:
+    """Create a vault snapshot."""
+    _ensure_dir()
+    ts = datetime.now(timezone.utc)
+    snap_id = f"snap-{ts.strftime('%Y%m%d_%H%M%S')}"
+
+    snapshot_data = {
+        "id": snap_id,
+        "task_id": task_id,
+        "label": snap_id,
+        "created_at": ts.isoformat(),
+        "entries_count": len(list((VAULT_DIR / "entries").glob("*.json"))),
+    }
+
+    (VAULT_DIR / "snapshots" / f"{snap_id}.json").write_text(
+        json.dumps(snapshot_data, indent=2)
+    )
+
+    return {"snapshot_id": snap_id, "created_at": ts.isoformat()}
 
 
 def health() -> Dict[str, Any]:
     """Check vault health."""
-    srv = _get_server()
-    if srv is None:
-        return {"status": "unavailable", "error": "Vault server not initialized"}
-    try:
-        async def _do():
-            await _ensure_initialized(srv)
-            return await srv._handle_health()
-        result = run_async(_do())
-        return _extract_text(result)
-    except Exception as e:
-        return {"status": "unavailable", "error": str(e)}
+    _ensure_dir()
 
+    entries_count = len(list((VAULT_DIR / "entries").glob("*.json")))
+    snapshots_count = len(list((VAULT_DIR / "snapshots").glob("*.json")))
+    total_size = sum(f.stat().st_size for f in VAULT_DIR.rglob("*") if f.is_file())
 
-def snapshot(task_id: str = "vault-snapshot") -> Dict[str, Any]:
-    """Get vault snapshot."""
-    srv = _get_server()
-    if srv is None:
-        return {"error": "Vault server unavailable"}
-    try:
-        async def _do():
-            await _ensure_initialized(srv)
-            return await srv._handle_snapshot({"task_id": task_id})
-        result = run_async(_do())
-        return _extract_text(result)
-    except Exception as e:
-        return {"error": f"Vault snapshot failed: {e}"}
+    return {
+        "status": "healthy",
+        "entries": entries_count,
+        "snapshots": snapshots_count,
+        "total_size_bytes": total_size,
+        "vault_path": str(VAULT_DIR),
+    }

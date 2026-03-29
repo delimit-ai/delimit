@@ -194,10 +194,13 @@ def design_extract_tokens(
 ) -> Dict[str, Any]:
     """Extract design tokens from project CSS/SCSS/Tailwind config.
 
-    If FIGMA_TOKEN env var is set and figma_file_key provided, fetches from Figma API.
+    If a Figma token is available and figma_file_key provided, fetches from Figma API.
     Otherwise scans local project files for CSS variables, Tailwind config, etc.
+
+    Token resolution order: FIGMA_TOKEN env var -> ~/.delimit/secrets/figma.json -> free fallback.
     """
-    figma_token = os.environ.get("FIGMA_TOKEN", "")
+    from ai.key_resolver import get_figma_token
+    figma_token, _token_source = get_figma_token()
     if figma_token and figma_file_key:
         return _figma_extract_tokens(figma_file_key, figma_token, token_types)
 
@@ -255,7 +258,7 @@ def design_extract_tokens(
         all_tokens["breakpoints"] = unique_bp
 
     total = sum(len(v) for v in all_tokens.values())
-    return {
+    result = {
         "tool": "design.extract_tokens",
         "status": "ok",
         "tokens": all_tokens,
@@ -263,6 +266,14 @@ def design_extract_tokens(
         "source_files": sorted(set(source_files)),
         "figma_used": False,
     }
+    # If user passed a figma_file_key but no token is available, add a hint
+    if figma_file_key and not figma_token:
+        result["hint"] = (
+            "Figma integration available -- set FIGMA_TOKEN env var "
+            "or store your token with `delimit_secret_store key=figma value=<token>`. "
+            "Local CSS/Tailwind tokens were extracted instead."
+        )
+    return result
 
 
 def _figma_extract_tokens(file_key: str, token: str, token_types: Optional[List[str]]) -> Dict[str, Any]:
@@ -647,6 +658,16 @@ def story_generate(
 ) -> Dict[str, Any]:
     """Generate a .stories.tsx file for a component (no Storybook required)."""
     comp = Path(component_path)
+    if not comp.exists() and "/" not in component_path and "\\" not in component_path:
+        # Bare name like "Button" — search current directory for matching files
+        search_root = Path.cwd()
+        name = comp.stem
+        for pattern in [f"**/{name}.tsx", f"**/{name}.jsx", f"**/{name}.ts", f"**/{name}.js"]:
+            matches = [p for p in search_root.glob(pattern)
+                       if "node_modules" not in str(p) and ".next" not in str(p)]
+            if matches:
+                comp = matches[0]
+                break
     if not comp.exists():
         return {"tool": "story.generate", "error": f"Component file not found: {comp}"}
 
@@ -715,6 +736,55 @@ type Story = StoryObj<typeof {comp_name}>;
 
 
 # ---------------------------------------------------------------------------
+# 25a. Puppeteer fallback for screenshots
+# ---------------------------------------------------------------------------
+
+def _puppeteer_screenshot_fallback(url: str, baselines_dir: Path) -> Dict[str, Any]:
+    """Take a screenshot via puppeteer (npx) when Playwright is not available."""
+    try:
+        baselines_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = re.sub(r"[^a-zA-Z0-9]", "_", url)[:100]
+        screenshot_path = baselines_dir / f"{safe_name}.png"
+
+        # Inline JS script for puppeteer
+        script = (
+            "const puppeteer = require('puppeteer');"
+            "(async () => {"
+            "  const browser = await puppeteer.launch({headless: 'new', args: ['--no-sandbox']});"
+            "  const page = await browser.newPage();"
+            "  await page.setViewport({width: 1280, height: 720});"
+            f"  await page.goto('{url}', {{waitUntil: 'networkidle2', timeout: 15000}});"
+            f"  await page.screenshot({{path: '{screenshot_path}'}});"
+            "  await browser.close();"
+            "})();"
+        )
+        result = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            return {
+                "tool": "story.visual_test",
+                "status": "puppeteer_error",
+                "error": result.stderr.decode(errors="replace")[:500],
+                "hint": "Puppeteer fallback failed. Install Playwright for better support: pip install playwright && python -m playwright install chromium",
+            }
+
+        return {
+            "tool": "story.visual_test",
+            "status": "ok",
+            "screenshot_path": str(screenshot_path),
+            "baseline_exists": False,
+            "diff_percent": None,
+            "engine": "puppeteer_fallback",
+            "hint": "Screenshot taken with puppeteer (fallback). Install Playwright for full visual regression with baseline comparison.",
+        }
+    except Exception as e:
+        return {"tool": "story.visual_test", "status": "error", "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
 # 25. story_visual_test
 # ---------------------------------------------------------------------------
 
@@ -723,19 +793,39 @@ def story_visual_test(
     project_path: Optional[str] = None,
     threshold: float = 0.05,
 ) -> Dict[str, Any]:
-    """Take a screenshot with Playwright and compare against baseline."""
+    """Take a screenshot with Playwright and compare against baseline.
+
+    Falls back to puppeteer (npx) if Playwright is not installed,
+    and returns install guidance if neither is available.
+    """
+    from ai.key_resolver import get_playwright, get_puppeteer
+
     root = Path(project_path) if project_path else Path.cwd()
     baselines_dir = root / ".delimit" / "visual-baselines"
 
-    if not _has_playwright():
+    pw_available, _ = get_playwright()
+
+    if not pw_available:
+        # Try puppeteer fallback via npx
+        pup_available, _ = get_puppeteer()
+        if pup_available:
+            return _puppeteer_screenshot_fallback(url, baselines_dir)
+
         return {
             "tool": "story.visual_test",
-            "status": "no_playwright",
-            "message": "Playwright is not installed. Install with: pip install playwright && python -m playwright install chromium",
+            "status": "no_screenshot_tool",
+            "message": (
+                "No screenshot tool available. Install one of the following:\n"
+                "  - Playwright (recommended): pip install playwright && python -m playwright install chromium\n"
+                "  - Puppeteer (fallback): npm install -g puppeteer"
+            ),
             "screenshot_path": None,
             "baseline_exists": False,
             "diff_percent": None,
-            "next_steps_hint": "Install Playwright for visual regression testing, or use static accessibility checks instead.",
+            "next_steps_hint": (
+                "Install Playwright for full visual regression testing, "
+                "or use `delimit_story_accessibility` for static checks that require no browser."
+            ),
         }
 
     try:
@@ -795,7 +885,24 @@ def story_visual_test(
         }
 
     except Exception as e:
-        return {"tool": "story.visual_test", "error": str(e)}
+        pup_available, _ = get_puppeteer()
+        if pup_available:
+            return _puppeteer_screenshot_fallback(url, baselines_dir)
+
+        return {
+            "tool": "story.visual_test",
+            "status": "playwright_error",
+            "error": str(e),
+            "screenshot_path": None,
+            "baseline_exists": False,
+            "diff_percent": None,
+            "engine": "playwright",
+            "hint": (
+                "Playwright is installed but could not launch a browser in this environment. "
+                "Install/configure a browser runtime that works in the current sandbox, or "
+                "use Puppeteer as a fallback."
+            ),
+        }
 
 
 # ---------------------------------------------------------------------------

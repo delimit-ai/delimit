@@ -4,7 +4,8 @@ Inbox polling daemon for Delimit's email governance system.
 Polls pro@delimit.ai via IMAP every 5 minutes, auto-classifies emails,
 forwards owner-action items, and handles draft approval via email replies.
 
-Consensus 116: Standalone daemon, fresh IMAP connections, 10-minute cancel window.
+Consensus 116: Standalone daemon, fresh IMAP connections.
+Auto-posting DISABLED — all approved drafts are emailed for manual posting.
 
 Can run as:
   - Standalone script: python inbox_daemon.py
@@ -126,6 +127,44 @@ _daemon_state = InboxDaemonState()
 
 
 # ── Logging ──────────────────────────────────────────────────────────
+
+def get_pending_directives() -> List[Dict]:
+    """Get founder directives that haven't been completed yet."""
+    directives = []
+    if not ROUTING_LOG.exists():
+        return directives
+    completed = set()
+    for line in ROUTING_LOG.read_text().splitlines():
+        try:
+            entry = json.loads(line)
+            if entry.get("event") == "founder_directive_completed":
+                completed.add(entry.get("directive_subject", ""))
+            elif entry.get("event") == "founder_directive_received":
+                directives.append(entry)
+        except (json.JSONDecodeError, KeyError):
+            continue
+    return [d for d in directives if d.get("subject", "") not in completed]
+
+
+def complete_directive(subject: str, result: str) -> None:
+    """Mark a founder directive as completed and send confirmation email."""
+    _log_routing({
+        "event": "founder_directive_completed",
+        "directive_subject": subject,
+        "result": result,
+    })
+    send_email(
+        to=FORWARD_TO,
+        subject=f"[COMPLETED] {subject}",
+        body=(
+            f"Your directive has been completed.\n\n"
+            f"Subject: {subject}\n"
+            f"Result: {result}\n"
+        ),
+        from_account="pro@delimit.ai",
+        event_type="founder_directive_completed",
+    )
+
 
 def _log_routing(entry: Dict[str, Any]) -> None:
     """Append a routing decision to the audit trail."""
@@ -367,22 +406,18 @@ def poll_once() -> Dict[str, Any]:
 
             elif draft_id and detect_approval_keywords(body_text):
                 # Both draft match AND approval keyword required (consensus)
-                mark_draft_status(draft_id, "approved-pending")
-                _daemon_state.add_pending_approval(draft_id, {
-                    "approved_at": datetime.now(timezone.utc).isoformat(),
-                    "approved_at_ts": time.time(),
-                })
-                # Send cancel-window notification
+                # Auto-posting is DISABLED — mark approved and confirm via email
+                mark_draft_status(draft_id, "approved")
                 send_email(
                     to=FORWARD_TO,
-                    subject=f"Draft {draft_id} approved - posting in 10 minutes",
+                    subject=f"Draft {draft_id} approved - ready for manual posting",
                     body=(
                         f"Draft {draft_id} has been approved via email reply.\n\n"
-                        f"It will be posted in 10 minutes.\n\n"
-                        f"Reply CANCEL to this email to stop the post."
+                        f"Auto-posting is disabled. Please post manually.\n\n"
+                        f"The draft text was included in the original notification email."
                     ),
                     from_account="pro@delimit.ai",
-                    event_type="draft_approval_window",
+                    event_type="draft_approval_confirmed",
                 )
                 action_taken = "approval_detected"
                 approvals.append(draft_id)
@@ -390,11 +425,37 @@ def poll_once() -> Dict[str, Any]:
                 imap.store(msg_id, "+FLAGS", "\\Seen")
 
             elif classification == "owner-action":
-                success = _forward_email(msg, smtp_pass)
-                if success:
+                # Emails FROM the founder are decisions/action items — acknowledge and track
+                if sender_addr.lower() == FORWARD_TO.lower():
+                    # Create a ledger item to track the founder's directive
+                    _directive_summary = subject[:80] if subject else body_text[:80]
+                    _log_routing({
+                        "event": "founder_directive_received",
+                        "subject": subject,
+                        "body_preview": body_text[:200],
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+                    # Acknowledge receipt
+                    send_email(
+                        to=FORWARD_TO,
+                        subject=f"[RECEIVED] {subject}",
+                        body=(
+                            f"Your directive has been received and logged.\n\n"
+                            f"Subject: {subject}\n"
+                            f"Status: PENDING — will be processed in the next loop iteration.\n\n"
+                            f"You'll receive a [COMPLETED] email when this is done."
+                        ),
+                        from_account="pro@delimit.ai",
+                        event_type="founder_directive_ack",
+                    )
                     imap.store(msg_id, "+FLAGS", "\\Seen")
-                    forwarded += 1
-                action_taken = "forwarded" if success else "forward_failed"
+                    action_taken = "founder_directive_acked"
+                else:
+                    success = _forward_email(msg, smtp_pass)
+                    if success:
+                        imap.store(msg_id, "+FLAGS", "\\Seen")
+                        forwarded += 1
+                    action_taken = "forwarded" if success else "forward_failed"
 
             else:
                 # Non-owner, mark as seen
@@ -414,8 +475,8 @@ def poll_once() -> Dict[str, Any]:
 
         imap.logout()
 
-        # Process pending approval windows (post drafts past the cancel window)
-        posted_drafts = _process_pending_approvals()
+        # Auto-posting disabled — no cancel window processing
+        posted_drafts = []
 
         _daemon_state.record_success(processed, forwarded)
 
