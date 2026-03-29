@@ -74,18 +74,19 @@ function findSpecFiles(dir, depth = 0) {
 }
 
 async function main() {
-    // Self-update check: ensure we're running the latest version
+    // Self-update check: ensure we're running the latest version (skip if already re-execed)
     const _pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
-    try {
-        const latest = execSync('npm view delimit-cli version 2>/dev/null', { encoding: 'utf-8', timeout: 5000 }).trim();
-        if (latest && latest !== _pkg.version && latest > _pkg.version) {
-            log(dim(`  Updating delimit-cli ${_pkg.version} -> ${latest}...`));
-            execSync('npm install -g delimit-cli@latest 2>/dev/null', { stdio: 'pipe', timeout: 30000 });
-            // Re-exec with the updated version from the NEW install location
-            execSync('delimit-cli setup', { stdio: 'inherit' });
-            process.exit(0);
-        }
-    } catch { /* offline or timeout — continue with current version */ }
+    if (!process.env.DELIMIT_SETUP_UPDATED) {
+        try {
+            const latest = execSync('npm view delimit-cli version 2>/dev/null', { encoding: 'utf-8', timeout: 5000 }).trim();
+            if (latest && latest !== _pkg.version && latest > _pkg.version) {
+                log(dim(`  Updating delimit-cli ${_pkg.version} -> ${latest}...`));
+                execSync('npm install -g delimit-cli@latest 2>/dev/null', { stdio: 'pipe', timeout: 30000 });
+                execSync('delimit-cli setup', { stdio: 'inherit', env: { ...process.env, DELIMIT_SETUP_UPDATED: '1' } });
+                process.exit(0);
+            }
+        } catch { /* offline or timeout — continue with current version */ }
+    }
 
     log('');
     log(purple('    ____  ________    ______  _____________'));
