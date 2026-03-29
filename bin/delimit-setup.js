@@ -999,21 +999,122 @@ exit 127
 
     log('');
 
-    // "What's next" box
-    log('  \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510');
-    log(`  \u2502  ${bold('What\'s next:')}                           \u2502`);
-    log('  \u2502                                         \u2502');
-    log(`  \u2502  1. ${blue('npx delimit-cli lint')}                \u2502`);
-    log(`  \u2502  2. ${blue('npx delimit-cli doctor')}              \u2502`);
-    log(`  \u2502  3. Add the GitHub Action to your repo  \u2502`);
-    log('  \u2502                                         \u2502');
-    log(`  \u2502  Docs: ${dim('https://delimit.ai/docs')}          \u2502`);
-    log(`  \u2502  Try:  ${dim('https://delimit.ai/try')}           \u2502`);
-    log('  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518');
+    // Project scan — show what Delimit already knows (STR-046)
+    log(`  ${bold('Your project:')}`);
+    const cwd = process.cwd();
+    let projectFindings = 0;
+
+    // Detect framework
+    const frameworks = [
+        { file: 'package.json', check: 'express', label: 'Express API' },
+        { file: 'package.json', check: 'fastify', label: 'Fastify API' },
+        { file: 'package.json', check: 'next', label: 'Next.js' },
+        { file: 'package.json', check: '@nestjs', label: 'NestJS' },
+        { file: 'requirements.txt', check: 'fastapi', label: 'FastAPI' },
+        { file: 'requirements.txt', check: 'django', label: 'Django' },
+        { file: 'requirements.txt', check: 'flask', label: 'Flask' },
+        { file: 'pyproject.toml', check: 'fastapi', label: 'FastAPI' },
+    ];
+    for (const fw of frameworks) {
+        const fwPath = path.join(cwd, fw.file);
+        try {
+            if (fs.existsSync(fwPath) && fs.readFileSync(fwPath, 'utf-8').toLowerCase().includes(fw.check)) {
+                await logp(`  ${green('✓')} Framework: ${fw.label}`);
+                projectFindings++;
+                break;
+            }
+        } catch {}
+    }
+
+    // Detect OpenAPI specs
+    const specPatterns = ['openapi.yaml', 'openapi.yml', 'openapi.json', 'swagger.yaml', 'swagger.json', 'api.yaml'];
+    let specFound = false;
+    for (const sp of specPatterns) {
+        if (fs.existsSync(path.join(cwd, sp))) {
+            await logp(`  ${green('✓')} API spec: ${sp}`);
+            specFound = true;
+            projectFindings++;
+            break;
+        }
+    }
+    if (!specFound) {
+        await logp(`  ${dim('  No API spec found — run')} ${blue('delimit-cli lint')} ${dim('to detect one')}`);
+    }
+
+    // Count tests
+    const testDirs = ['tests', 'test', '__tests__', 'spec'];
+    for (const td of testDirs) {
+        const testPath = path.join(cwd, td);
+        if (fs.existsSync(testPath)) {
+            try {
+                const testFiles = fs.readdirSync(testPath).filter(f => f.includes('test') || f.includes('spec'));
+                if (testFiles.length > 0) {
+                    await logp(`  ${green('✓')} Tests: ${testFiles.length} test files in ${td}/`);
+                    projectFindings++;
+                    break;
+                }
+            } catch {}
+        }
+    }
+
+    // Check git status
+    try {
+        const gitStatus = execSync('git log --oneline -1 2>/dev/null', { encoding: 'utf-8', timeout: 3000 }).trim();
+        if (gitStatus) {
+            await logp(`  ${green('✓')} Git: ${gitStatus.substring(0, 50)}`);
+            projectFindings++;
+        }
+    } catch {}
+
+    // Check for existing .delimit context
+    const ledgerDir = path.join(os.homedir(), '.delimit', 'ledger');
+    if (fs.existsSync(ledgerDir)) {
+        try {
+            const ledgerFiles = fs.readdirSync(ledgerDir).filter(f => f.endsWith('.json'));
+            let totalItems = 0;
+            for (const lf of ledgerFiles) {
+                try {
+                    const items = JSON.parse(fs.readFileSync(path.join(ledgerDir, lf), 'utf-8'));
+                    if (Array.isArray(items)) totalItems += items.filter(i => i.status === 'open').length;
+                } catch {}
+            }
+            if (totalItems > 0) {
+                await logp(`  ${green('✓')} Ledger: ${totalItems} open items across ventures`);
+                projectFindings++;
+            }
+        } catch {}
+    }
+
+    // Check for sessions
+    const sessionsDir = path.join(os.homedir(), '.delimit', 'sessions');
+    if (fs.existsSync(sessionsDir)) {
+        try {
+            const sessions = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.json'));
+            if (sessions.length > 0) {
+                await logp(`  ${green('✓')} Sessions: ${sessions.length} handoff(s) saved`);
+                projectFindings++;
+            }
+        } catch {}
+    }
+
+    if (projectFindings === 0) {
+        log(`  ${dim('  New project — run')} ${blue('delimit-cli demo')} ${dim('to see governance in action')}`);
+    }
+
     log('');
-    log(`  ${dim('Config:')} ${MCP_CONFIG}`);
-    log(`  ${dim('Server:')} ${actualServer}`);
-    log(`  ${dim('Agents:')} ${AGENTS_DIR}`);
+
+    // Suggested next action based on findings
+    log(`  ${bold('Next action:')}`);
+    if (specFound) {
+        log(`    ${green('delimit-cli lint')}  — check your API spec for breaking changes`);
+    } else if (projectFindings > 0) {
+        log(`    ${green('delimit-cli scan')} — detect API specs and potential issues`);
+    } else {
+        log(`    ${green('delimit-cli demo')} — see governance in action (30 seconds)`);
+    }
+    log('');
+    log(`  ${dim('Docs: https://delimit.ai/docs')}`);
+    log(`  ${dim('Try:  https://delimit.ai/try')}`);
     log('');
     log(`  ${bold('Keep Building.')}`);
     log('');

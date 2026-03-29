@@ -1647,6 +1647,124 @@ program
         } catch {}
     });
 
+// Resume command — show what was happening last session (STR-047)
+program
+    .command('resume')
+    .description('Show what you were working on — context from your last session')
+    .action(async () => {
+        console.log(chalk.bold('\n  Delimit — Resume Work\n'));
+
+        const DELIMIT_HOME = path.join(os.homedir(), '.delimit');
+
+        // 1. Last session handoff
+        const sessionsDir = path.join(DELIMIT_HOME, 'sessions');
+        if (fs.existsSync(sessionsDir)) {
+            try {
+                const sessions = fs.readdirSync(sessionsDir)
+                    .filter(f => f.endsWith('.json'))
+                    .sort()
+                    .reverse();
+
+                if (sessions.length > 0) {
+                    const lastSession = JSON.parse(fs.readFileSync(path.join(sessionsDir, sessions[0]), 'utf-8'));
+                    const ts = sessions[0].replace('session_', '').replace('.json', '').replace(/_/g, ' ');
+                    console.log(chalk.bold('  Last session:') + chalk.gray(` ${ts}`));
+                    if (lastSession.summary) {
+                        console.log(chalk.gray(`  ${lastSession.summary.substring(0, 200)}`));
+                    }
+                    if (lastSession.tasks_completed && lastSession.tasks_completed.length > 0) {
+                        console.log(chalk.green(`  ${lastSession.tasks_completed.length} task(s) completed`));
+                    }
+                    if (lastSession.pending && lastSession.pending.length > 0) {
+                        console.log(chalk.yellow(`  ${lastSession.pending.length} item(s) pending`));
+                        lastSession.pending.slice(0, 3).forEach(p => {
+                            console.log(chalk.gray(`    • ${typeof p === 'string' ? p : p.title || JSON.stringify(p).substring(0, 80)}`));
+                        });
+                    }
+                    console.log('');
+                }
+            } catch {}
+        }
+
+        // 2. Open ledger items
+        const ledgerDir = path.join(DELIMIT_HOME, 'ledger');
+        if (fs.existsSync(ledgerDir)) {
+            try {
+                const ledgerFiles = fs.readdirSync(ledgerDir).filter(f => f.endsWith('.json'));
+                let openItems = [];
+                for (const lf of ledgerFiles) {
+                    try {
+                        const items = JSON.parse(fs.readFileSync(path.join(ledgerDir, lf), 'utf-8'));
+                        if (Array.isArray(items)) {
+                            openItems.push(...items.filter(i => i.status === 'open'));
+                        }
+                    } catch {}
+                }
+                if (openItems.length > 0) {
+                    // Sort by priority
+                    const priorityOrder = { P0: 0, P1: 1, P2: 2 };
+                    openItems.sort((a, b) => (priorityOrder[a.priority] || 3) - (priorityOrder[b.priority] || 3));
+
+                    console.log(chalk.bold(`  Open items: ${openItems.length}`));
+                    const p0 = openItems.filter(i => i.priority === 'P0');
+                    const p1 = openItems.filter(i => i.priority === 'P1');
+                    if (p0.length > 0) {
+                        console.log(chalk.red(`  ${p0.length} urgent (P0):`));
+                        p0.slice(0, 3).forEach(i => console.log(chalk.gray(`    ${i.id}: ${i.title.substring(0, 60)}`)));
+                    }
+                    if (p1.length > 0) {
+                        console.log(chalk.yellow(`  ${p1.length} important (P1)`));
+                    }
+                    console.log('');
+                }
+            } catch {}
+        }
+
+        // 3. Recent memory
+        const memoryDir = path.join(DELIMIT_HOME, 'memory');
+        if (fs.existsSync(memoryDir)) {
+            try {
+                const memFiles = fs.readdirSync(memoryDir)
+                    .filter(f => f.endsWith('.json'))
+                    .map(f => ({ name: f, mtime: fs.statSync(path.join(memoryDir, f)).mtimeMs }))
+                    .sort((a, b) => b.mtime - a.mtime)
+                    .slice(0, 3);
+
+                if (memFiles.length > 0) {
+                    console.log(chalk.bold('  Recent memory:'));
+                    for (const mf of memFiles) {
+                        try {
+                            const mem = JSON.parse(fs.readFileSync(path.join(memoryDir, mf.name), 'utf-8'));
+                            const key = mem.key || mf.name.replace('.json', '');
+                            const val = (mem.content || mem.value || '').substring(0, 60);
+                            console.log(chalk.gray(`    ${key}: ${val}`));
+                        } catch {}
+                    }
+                    console.log('');
+                }
+            } catch {}
+        }
+
+        // 4. Git context
+        try {
+            const branch = execSync('git branch --show-current 2>/dev/null', { encoding: 'utf-8', timeout: 3000 }).trim();
+            const lastCommit = execSync('git log --oneline -1 2>/dev/null', { encoding: 'utf-8', timeout: 3000 }).trim();
+            const status = execSync('git status --porcelain 2>/dev/null', { encoding: 'utf-8', timeout: 3000 }).trim();
+            const changed = status ? status.split('\n').length : 0;
+
+            console.log(chalk.bold('  Git:'));
+            console.log(chalk.gray(`    Branch: ${branch}`));
+            console.log(chalk.gray(`    Last: ${lastCommit.substring(0, 60)}`));
+            if (changed > 0) console.log(chalk.yellow(`    ${changed} uncommitted file(s)`));
+            console.log('');
+        } catch {}
+
+        // 5. Suggested action
+        console.log(chalk.bold('  Start here:'));
+        console.log(`    ${chalk.green('Ask your AI:')} "Check the ledger and work on the highest priority item"`);
+        console.log('');
+    });
+
 // Try command — zero-risk demo with Markdown report artifact (LED-264)
 program
     .command('try')
