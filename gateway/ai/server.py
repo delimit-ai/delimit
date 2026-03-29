@@ -6213,9 +6213,9 @@ def delimit_notify(channel: str = "webhook", message: str = "",
         subject: Subject line (email only). Use [ACTION], [INFO], [ALERT] prefix.
         event_type: Event category for filtering.
         to: Recipient email address (email only). Overrides default DELIMIT_SMTP_TO.
-            Send to any address — leave empty for default (jamsonsholdings@gmail.com).
+            Send to any address — leave empty for default (owner@example.com).
         from_account: Sender account key from ~/.delimit/secrets/smtp-all.json
-            (e.g. 'pro@delimit.ai', 'admin@wire.report'). Email only.
+            (e.g. 'pro@example.com', 'admin@example.com'). Email only.
     """
     from ai.notify import send_notification
     return _with_next_steps("notify", _safe_call(
@@ -6321,7 +6321,7 @@ def delimit_notify_inbox(action: str = "status", limit: int = 10,
     """Check inbound email inbox, classify, and route (Pro).
 
     Polls pro@delimit.ai via IMAP. Classifies emails as owner-action
-    (forwards to jamsonsholdings@gmail.com) or non-owner (stays in inbox).
+    (forwards to owner@example.com) or non-owner (stays in inbox).
 
     Args:
         action: 'status' (show inbox state), 'poll' (classify and optionally forward),
