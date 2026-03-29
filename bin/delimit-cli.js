@@ -2156,6 +2156,7 @@ program
     .command('setup')
     .description('Install Delimit MCP governance tools into all AI assistants')
     .option('--dry-run', 'Preview config changes without writing anything')
+    .option('--yes', 'Skip all prompts and accept defaults')
     .action((options) => {
         if (options.dryRun) {
             const os = require('os');
