@@ -760,6 +760,9 @@ const hookCmd = program
                 case 'pre-commit':
                     await crossModelHooks.hookPreCommit();
                     break;
+                case 'deploy-gate':
+                    await crossModelHooks.hookDeployGate();
+                    break;
                 default:
                     // Legacy: fall back to agent-based hook evaluation
                     await ensureAgent();
