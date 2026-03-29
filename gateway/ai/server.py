@@ -3632,6 +3632,42 @@ STANDARD_WORKFLOWS = [
 
 
 @mcp.tool()
+def delimit_project_config(action: str = "load", project_path: str = ".",
+                            mode: str = "advisory", preset: str = "default",
+                            task_type: str = "") -> Dict[str, Any]:
+    """Manage delimit.yml project configuration.
+
+    A committable YAML file that defines AI governance for your repo.
+    Your teammates get the same AI setup when they clone.
+
+    Actions:
+      load: Read current project config (or defaults if no delimit.yml)
+      init: Create a delimit.yml in your project root
+      model: Get recommended model for a task type
+
+    Args:
+        action: "load", "init", or "model".
+        project_path: Project root directory.
+        mode: Governance mode for init (advisory/guarded/enforce).
+        preset: Policy preset for init (strict/default/relaxed).
+        task_type: Task type for model lookup (refactoring/testing/docs/debugging).
+    """
+    from ai.project_config import load_project_config, init_project_config, get_model_for_task
+
+    if action == "init":
+        return _with_next_steps("project_config", _safe_call(
+            init_project_config, project_path=project_path, mode=mode, preset=preset,
+        ))
+    if action == "model":
+        return _with_next_steps("project_config", _safe_call(
+            get_model_for_task, task_type=task_type, project_path=project_path,
+        ))
+    return _with_next_steps("project_config", _safe_call(
+        load_project_config, project_path=project_path,
+    ))
+
+
+@mcp.tool()
 def delimit_playbook(action: str = "list", name: str = "", prompt: str = "",
                       description: str = "", variables: str = "",
                       model_hint: str = "", tags: str = "") -> Dict[str, Any]:
