@@ -590,3 +590,109 @@ def check_docs_freshness(
         "stale": stale,
         "message": f"{len(findings)} doc issue(s) found" if findings else "Documentation is up to date",
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  LED-279: Self-Extending Swarm — Founder Mode
+#  Agents can create new MCP tools when authorized
+# ═══════════════════════════════════════════════════════════════════════
+
+TOOLS_DIR = Path.home() / ".delimit" / "swarm" / "custom_tools"
+
+
+def create_tool(
+    name: str,
+    code: str,
+    venture: str,
+    agent_id: str = "",
+    description: str = "",
+) -> Dict[str, Any]:
+    """Create a new MCP tool (founder mode only).
+
+    Writes a Python module that can be loaded by the MCP server.
+    Requires reviewer approval before activation.
+    """
+    if not name or not code:
+        return {"error": "name and code are required"}
+
+    # Verify agent has creation authority
+    registry = _load_registry()
+    agent = registry["agents"].get(agent_id, {})
+    role = agent.get("role", "")
+    if role not in ("architect", "senior_dev"):
+        return {
+            "error": f"Role '{role}' cannot create tools. Only architect and senior_dev have creation authority.",
+            "agent_id": agent_id,
+        }
+
+    # Verify venture namespace
+    if agent.get("venture", "") != venture:
+        return {"error": f"Agent '{agent_id}' cannot create tools for venture '{venture}'"}
+
+    # Security scan — check for dangerous patterns
+    dangerous = [
+        "subprocess.call", "os.system", "exec(", "eval(",
+        "import socket", "import http.server",
+        "__import__", "compile(",
+    ]
+    for pattern in dangerous:
+        if pattern in code:
+            return {
+                "error": f"Security violation: '{pattern}' is not allowed in custom tools",
+                "blocked_pattern": pattern,
+            }
+
+    # Write tool module
+    TOOLS_DIR.mkdir(parents=True, exist_ok=True)
+    venture_dir = TOOLS_DIR / venture
+    venture_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_name = name.lower().replace("-", "_").replace(" ", "_")
+    tool_path = venture_dir / f"{safe_name}.py"
+    tool_path.write_text(code)
+
+    # Log creation
+    _log({
+        "action": "tool_created",
+        "tool_name": safe_name,
+        "venture": venture,
+        "agent_id": agent_id,
+        "path": str(tool_path),
+        "lines": len(code.split("\n")),
+        "status": "pending_review",
+    })
+
+    return {
+        "status": "created",
+        "tool_name": safe_name,
+        "path": str(tool_path),
+        "venture": venture,
+        "created_by": agent_id,
+        "lines": len(code.split("\n")),
+        "next_step": "Reviewer agent must approve before tool is activated",
+        "message": f"Tool '{safe_name}' created for {venture}. Pending reviewer approval.",
+    }
+
+
+def list_custom_tools(venture: str = "") -> Dict[str, Any]:
+    """List custom tools created by agents."""
+    TOOLS_DIR.mkdir(parents=True, exist_ok=True)
+    tools = []
+
+    search_dirs = [TOOLS_DIR / venture] if venture else list(TOOLS_DIR.iterdir())
+    for d in search_dirs:
+        if d.is_dir():
+            for f in sorted(d.glob("*.py")):
+                tools.append({
+                    "name": f.stem,
+                    "venture": d.name,
+                    "path": str(f),
+                    "lines": len(f.read_text().split("\n")),
+                })
+
+    return {
+        "status": "ok",
+        "tools": tools,
+        "total": len(tools),
+        "venture_filter": venture or "all",
+    }

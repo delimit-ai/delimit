@@ -14,7 +14,35 @@ Reference: Consensus 118/119/120 — Tool Segmentation Architecture.
 
 from typing import Dict, Literal
 
-Tier = Literal["public", "ops_pack", "internal", "experimental"]
+Tier = Literal["core", "public", "ops_pack", "internal", "experimental"]
+
+# ─────────────────────────────────────────────────────────────────────
+#  CORE WORKFLOWS — the 5 outcomes first users should see
+#
+#  1. Govern: catch breaking changes before deploy
+#  2. Remember: persistent memory across models and sessions
+#  3. Handoff: switch models without losing context
+#  4. Lint: validate API specs for drift
+#  5. Track: ledger for tasks that survive context resets
+#
+#  Per consensus (STR-040): sell 5 workflows, not 162 tools
+# ─────────────────────────────────────────────────────────────────────
+
+CORE_TOOLS = {
+    # Govern
+    "delimit_lint", "delimit_scan", "delimit_gov_health", "delimit_drift_check",
+    # Remember
+    "delimit_memory_store", "delimit_memory_search", "delimit_memory_recent",
+    # Handoff
+    "delimit_session_handoff", "delimit_session_history",
+    # Lint + Diff
+    "delimit_diff", "delimit_semver", "delimit_explain",
+    # Track
+    "delimit_ledger_context", "delimit_ledger_add", "delimit_ledger_done",
+    "delimit_ledger_list", "delimit_ledger_update",
+    # Setup
+    "delimit_init", "delimit_scan", "delimit_version", "delimit_help",
+}
 
 # ─────────────────────────────────────────────────────────────────────
 #  TOOL_TIERS: canonical tier assignment for every registered tool.
@@ -31,12 +59,12 @@ Tier = Literal["public", "ops_pack", "internal", "experimental"]
 # ─────────────────────────────────────────────────────────────────────
 
 TOOL_TIERS: Dict[str, Tier] = {
-    # === Govern domain (all public) ===
-    "delimit_lint": "public",
-    "delimit_diff": "public",
+    # === Govern domain ===
+    "delimit_lint": "core",
+    "delimit_diff": "core",
     "delimit_policy": "public",
-    "delimit_semver": "public",
-    "delimit_explain": "public",
+    "delimit_semver": "core",
+    "delimit_explain": "core",
     "delimit_zero_spec": "public",
     "delimit_init": "public",
     "delimit_gov_health": "public",

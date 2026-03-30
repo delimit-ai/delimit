@@ -3697,6 +3697,14 @@ def delimit_swarm(action: str = "status", venture: str = "",
         return _with_next_steps("swarm", _safe_call(
             check_docs_freshness, project_path=repo_path or ".",
         ))
+    if action == "create_tool":
+        from ai.swarm import create_tool
+        return _with_next_steps("swarm", _safe_call(
+            create_tool, name=target_path, code=repo_path, venture=venture, agent_id=agent_id,
+        ))
+    if action == "list_tools":
+        from ai.swarm import list_custom_tools
+        return _with_next_steps("swarm", _safe_call(list_custom_tools, venture=venture))
     return _with_next_steps("swarm", _safe_call(get_swarm_status))
 
 
@@ -6513,7 +6521,7 @@ def delimit_notify(channel: str = "webhook", message: str = "",
         to: Recipient email address (email only). Overrides default DELIMIT_SMTP_TO.
             Send to any address — leave empty for default (owner@example.com).
         from_account: Sender account key from ~/.delimit/secrets/smtp-all.json
-            (e.g. 'pro@example.com', 'admin@example.com'). Email only.
+            (e.g. 'pro@delimit.ai', 'admin@wire.report'). Email only.
     """
     from ai.notify import send_notification
     return _with_next_steps("notify", _safe_call(

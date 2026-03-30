@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.15.13] - 2026-03-29
+
+### Added
+- **Self-extending swarm**: Architect and Senior Dev agents can create new MCP tools at runtime
+- **Tool security scan**: Block dangerous patterns (subprocess, exec, eval, socket) in custom tools
+- **8 new modules**: activate_helpers, cross_model_audit, github_scanner, handoff_receipts, reddit_scanner, session_phoenix, social_target, toolcard_cache
+- **Reviewer approval gate**: Custom tools require reviewer sign-off before activation
+
+### Changed
+- Swarm actions expanded: create_tool, list_tools now available via delimit_swarm
+- Inbox daemon: enhanced email classification and approval routing
+- Social pipeline: improved content generation and scheduling
+
 ## [3.15.9] - 2026-03-30
 
 ### Added

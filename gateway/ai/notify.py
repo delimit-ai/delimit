@@ -37,7 +37,7 @@ INBOX_ROUTING_FILE = Path.home() / ".delimit" / "inbox_routing.jsonl"
 IMAP_HOST = "mail.spacemail.com"
 IMAP_PORT = 993
 IMAP_USER = "pro@delimit.ai"
-FORWARD_TO = "configured-email@example.com"
+FORWARD_TO = "owner@example.com"
 
 # Domains/senders whose emails require owner action
 OWNER_ACTION_DOMAINS = {
@@ -61,7 +61,7 @@ OWNER_ACTION_DOMAINS = {
 }
 
 OWNER_ACTION_SENDERS = {
-    "configured-email@example.com",
+    "owner@example.com",
 }
 
 # Subject patterns that indicate owner-action (compiled once)
@@ -223,7 +223,7 @@ def send_email(
 
     Args:
         to: Recipient email address. Falls back to DELIMIT_SMTP_TO or
-            configured-email@example.com.
+            owner@example.com.
         subject: Email subject line.
         body: Email body text (preferred). Falls back to 'message' for
             backward compatibility.
@@ -258,7 +258,7 @@ def send_email(
         smtp_pass = os.environ.get("DELIMIT_SMTP_PASS", "")
         smtp_from = os.environ.get("DELIMIT_SMTP_FROM", "")
 
-    smtp_to = to or os.environ.get("DELIMIT_SMTP_TO", "configured-email@example.com")
+    smtp_to = to or os.environ.get("DELIMIT_SMTP_TO", "owner@example.com")
 
     if not all([smtp_host, smtp_from, smtp_to]):
         record = {
