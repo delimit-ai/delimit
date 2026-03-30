@@ -1,7 +1,2 @@
-"""content_engine — Pro feature. Runs server-side.
-
-This module requires the Delimit MCP server to be running.
-Configure via: npx delimit-cli setup
-"""
-
-# Stub — full implementation runs server-side
+# content_engine — Pro module (stubbed in npm package)
+# Full implementation available on delimit.ai server
