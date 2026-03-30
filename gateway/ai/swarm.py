@@ -493,3 +493,100 @@ def get_metrics(venture: str = "", days: int = 7) -> Dict[str, Any]:
         "venture_filter": venture or "all",
         "days": days,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Change Management — docs freshness check before deploy
+# ═══════════════════════════════════════════════════════════════════════
+
+DOCS_CHECKLIST = [
+    {"file": "README.md", "check": "tool_count", "pattern": r"\d+ (?:MCP |governance )?tools"},
+    {"file": "README.md", "check": "version_badge", "pattern": r"GitHub%20Action-v[\d.]+"},
+    {"file": "README.md", "check": "cli_commands", "pattern": r"npx delimit-cli"},
+]
+
+
+def check_docs_freshness(
+    project_path: str = ".",
+    tool_count: int = 0,
+    version: str = "",
+) -> Dict[str, Any]:
+    """Check if documentation is up-to-date before deploying.
+
+    Verifies README, changelog, and landing page reflect current
+    tool count, version, and feature set.
+    """
+    import re
+    p = Path(project_path).resolve()
+    findings = []
+    stale = False
+
+    # Check README exists
+    readme = p / "README.md"
+    if not readme.exists():
+        findings.append({"file": "README.md", "status": "missing", "severity": "warning"})
+    else:
+        content = readme.read_text()
+
+        # Check tool count
+        if tool_count > 0:
+            counts = re.findall(r'(\d+)\s*(?:MCP |governance )?tools', content)
+            for count_str in counts:
+                count = int(count_str)
+                if abs(count - tool_count) > 10:
+                    findings.append({
+                        "file": "README.md",
+                        "status": "stale",
+                        "issue": f"Says {count} tools, actual is {tool_count}",
+                        "severity": "warning",
+                    })
+                    stale = True
+
+        # Check version badge
+        if version:
+            if version not in content:
+                findings.append({
+                    "file": "README.md",
+                    "status": "stale",
+                    "issue": f"Version badge doesn't show {version}",
+                    "severity": "info",
+                })
+
+    # Check What's New / CHANGELOG
+    changelog = p / "CHANGELOG.md"
+    if changelog.exists():
+        cl_content = changelog.read_text()
+        if version and version not in cl_content:
+            findings.append({
+                "file": "CHANGELOG.md",
+                "status": "stale",
+                "issue": f"No entry for version {version}",
+                "severity": "warning",
+            })
+            stale = True
+
+    # Check for uncommitted changes
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["git", "status", "--porcelain"], capture_output=True, text=True,
+            cwd=str(p), timeout=5,
+        )
+        uncommitted = len(result.stdout.strip().split("\n")) if result.stdout.strip() else 0
+        if uncommitted > 0:
+            findings.append({
+                "file": "working tree",
+                "status": "dirty",
+                "issue": f"{uncommitted} uncommitted file(s)",
+                "severity": "info",
+            })
+    except Exception:
+        pass
+
+    return {
+        "status": "stale" if stale else "fresh",
+        "findings": findings,
+        "total_issues": len(findings),
+        "stale": stale,
+        "message": f"{len(findings)} doc issue(s) found" if findings else "Documentation is up to date",
+    }

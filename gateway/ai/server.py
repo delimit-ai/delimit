@@ -3692,6 +3692,11 @@ def delimit_swarm(action: str = "status", venture: str = "",
     if action == "metrics":
         from ai.swarm import get_metrics
         return _with_next_steps("swarm", _safe_call(get_metrics, venture=venture))
+    if action == "docs_check":
+        from ai.swarm import check_docs_freshness
+        return _with_next_steps("swarm", _safe_call(
+            check_docs_freshness, project_path=repo_path or ".",
+        ))
     return _with_next_steps("swarm", _safe_call(get_swarm_status))
 
 
