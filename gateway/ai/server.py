@@ -3632,6 +3632,255 @@ STANDARD_WORKFLOWS = [
 
 
 @mcp.tool()
+def delimit_swarm(action: str = "status", venture: str = "",
+                   agent_id: str = "", repo_path: str = "",
+                   deploy_target: str = "", target_path: str = "",
+                   access_action: str = "read") -> Dict[str, Any]:
+    """Manage the agent swarm — ventures, personas, namespace isolation.
+
+    Each venture gets 5 AI agent roles (Architect, Senior Dev, Reviewer, QA, Ops)
+    with namespace isolation and model binding per Agent Swarm Standard v1.2.
+
+    Actions:
+      status: Full swarm overview (ventures, agents, health)
+      register: Register a new venture with agent team
+      venture: Get venture details + its agents
+      agent: Get agent details
+      check: Check namespace access for an agent
+      approve: Check approval tier for an action
+      guide: Get usage documentation
+      rules: Get escalation rules
+
+    Args:
+        action: "status", "register", "venture", "agent", "check", "approve", "guide", or "rules".
+        venture: Venture name (for register/venture).
+        agent_id: Agent ID like "delimit-architect-01" (for agent/check).
+        repo_path: Repo path for venture registration.
+        deploy_target: Deploy target for venture registration.
+        target_path: File path to check access for (check action).
+        access_action: Action name — for check: "read"/"write"/"deploy". For approve: "deploy_production"/"deploy_staging"/"social_post" etc.
+    """
+    from ai.swarm import (register_venture, get_venture, get_agent,
+                           check_namespace_access, get_swarm_status,
+                           check_approval, get_escalation_rules, get_usage_guide)
+
+    if action == "register":
+        return _with_next_steps("swarm", _safe_call(
+            register_venture, name=venture, repo_path=repo_path, deploy_target=deploy_target,
+        ))
+    if action == "venture":
+        return _with_next_steps("swarm", _safe_call(get_venture, name=venture))
+    if action == "agent":
+        return _with_next_steps("swarm", _safe_call(get_agent, agent_id=agent_id))
+    if action == "approve":
+        return _with_next_steps("swarm", _safe_call(
+            check_approval, action=access_action, venture=venture, agent_id=agent_id,
+        ))
+    if action == "guide":
+        return _with_next_steps("swarm", _safe_call(get_usage_guide))
+    if action == "rules":
+        return _with_next_steps("swarm", _safe_call(get_escalation_rules))
+    if action == "check":
+        return _with_next_steps("swarm", _safe_call(
+            check_namespace_access, agent_id=agent_id, target_path=target_path, action=access_action,
+        ))
+    return _with_next_steps("swarm", _safe_call(get_swarm_status))
+
+
+@mcp.tool()
+def delimit_review(diff: str = "", file_path: str = "",
+                    context: str = "", pr_url: str = "") -> Dict[str, Any]:
+    """Run a multi-model code review on a diff or file.
+
+    Sends the code change to multiple AI models and consolidates their
+    feedback into a single structured review. The output can be posted
+    as a GitHub PR comment.
+
+    Provide either a diff string or a file path to review.
+
+    Args:
+        diff: Git diff or code to review. Takes priority over file_path.
+        file_path: Path to file to review (reads current content).
+        context: Additional context about the change (what it does, why).
+        pr_url: GitHub PR URL for linking the review.
+    """
+    from ai.multi_review import generate_review_prompt, consolidate_reviews, save_review
+
+    # Get the diff content
+    if not diff and file_path:
+        try:
+            from subprocess import run as _run
+            result = _run(
+                ["git", "diff", "HEAD", "--", file_path],
+                capture_output=True, text=True, timeout=10,
+            )
+            diff = result.stdout or Path(file_path).read_text()[:5000]
+        except Exception:
+            try:
+                diff = Path(file_path).read_text()[:5000]
+            except Exception as e:
+                return {"error": f"Could not read {file_path}: {e}"}
+
+    if not diff:
+        return {"error": "Provide either diff text or file_path to review"}
+
+    prompt = generate_review_prompt(diff, context)
+
+    # Run through deliberation engine for multi-model feedback
+    try:
+        from ai.deliberation import get_models_config
+        config = get_models_config()
+        enabled = {k: v for k, v in config.items() if v.get("enabled")}
+
+        if len(enabled) < 2:
+            return {
+                "error": "Need at least 2 AI models for multi-model review",
+                "tip": "Configure models in ~/.delimit/models.json",
+            }
+
+        reviews = []
+        from ai.deliberation import _call_model
+        import time as _time
+
+        for model_id, model_config in list(enabled.items())[:3]:
+            start = _time.time()
+            try:
+                response = _call_model(model_id, model_config, prompt,
+                    system_prompt="You are a senior code reviewer. Be concise and actionable.")
+                duration = int((_time.time() - start) * 1000)
+                reviews.append({
+                    "model": model_config.get("name", model_id),
+                    "content": response,
+                    "duration_ms": duration,
+                })
+            except Exception as e:
+                reviews.append({
+                    "model": model_config.get("name", model_id),
+                    "content": f"Review failed: {e}",
+                    "duration_ms": 0,
+                })
+
+        report = consolidate_reviews(reviews)
+        result = save_review(diff, report, pr_url)
+
+        return _with_next_steps("review", {
+            "status": "complete",
+            "models_used": report["models_used"],
+            "review_count": len(reviews),
+            "pr_comment": result["pr_comment"],
+            "review_id": result["review_id"],
+        })
+
+    except ImportError:
+        return {"error": "Deliberation engine required for multi-model review"}
+
+
+@mcp.tool()
+def delimit_redact(action: str = "scan", text: str = "",
+                    categories: str = "") -> Dict[str, Any]:
+    """Scan or redact sensitive data (API keys, secrets, PII) from text.
+
+    Use before sending prompts to external LLMs to prevent data leakage.
+    Detects: API keys (OpenAI, xAI, Google, GitHub, npm), passwords,
+    bearer tokens, emails, phone numbers, SSNs, credit cards, IPs, DB URLs.
+
+    Actions:
+      scan: Preview what would be redacted (non-destructive)
+      redact: Replace sensitive data with [REDACTED_TYPE_N] tokens
+
+    Args:
+        action: "scan" or "redact".
+        text: Text to scan/redact.
+        categories: Comma-separated categories (api_key, secret, pii, infra). Empty = all.
+    """
+    from ai.pii_redact import scan as pii_scan, redact as pii_redact
+
+    cat_list = [c.strip() for c in categories.split(",") if c.strip()] if categories else None
+
+    if action == "redact":
+        result = pii_redact(text, categories=cat_list)
+        # Never expose token_map through MCP — keep it local
+        return _with_next_steps("redact", {
+            "redacted": result["redacted"],
+            "findings": result["findings"],
+            "token_count": result["token_count"],
+        })
+
+    return _with_next_steps("redact", _safe_call(pii_scan, text=text))
+
+
+@mcp.tool()
+def delimit_prompt_drift(action: str = "check", prompt: str = "",
+                          model: str = "", result_summary: str = "",
+                          success: str = "true", task_type: str = "") -> Dict[str, Any]:
+    """Detect prompt drift — when the same task behaves differently across models.
+
+    Track how prompts perform across Claude, Codex, and Gemini.
+    Find which model is best for each task type on YOUR codebase.
+
+    Actions:
+      record: Log a prompt result (model, success, duration)
+      check: Detect drift across models for a prompt or task type
+      rank: Rank models by success rate and speed
+
+    Args:
+        action: "record", "check", or "rank".
+        prompt: The prompt text (for record/check).
+        model: AI model name (for record).
+        result_summary: Brief description of the result (for record).
+        success: Whether the result was good ("true"/"false").
+        task_type: Task category (refactoring/testing/debugging/docs).
+    """
+    from ai.prompt_drift import record_result, check_drift, get_model_rankings
+
+    if action == "record":
+        return _with_next_steps("prompt_drift", _safe_call(
+            record_result, prompt=prompt, model=model,
+            result_summary=result_summary,
+            success=success.lower().strip() in ("true", "1", "yes"),
+            task_type=task_type,
+        ))
+    if action == "rank":
+        return _with_next_steps("prompt_drift", _safe_call(
+            get_model_rankings, task_type=task_type,
+        ))
+    return _with_next_steps("prompt_drift", _safe_call(
+        check_drift, prompt=prompt, task_type=task_type,
+    ))
+
+
+@mcp.tool()
+def delimit_collision_check(action: str = "check", file_path: str = "",
+                             model: str = "", task_id: str = "") -> Dict[str, Any]:
+    """Detect and prevent two AI models from editing the same file.
+
+    Call before editing a file to check if another model is already working on it.
+
+    Actions:
+      check: Show all active file locks and hotspots
+      claim: Claim a file before editing (returns collision if held)
+      release: Release a file lock after done editing
+
+    Args:
+        action: "check", "claim", or "release".
+        file_path: File to claim/release (required for claim/release).
+        model: AI model name (claude/codex/gemini).
+        task_id: Optional task ID for tracking.
+    """
+    from ai.collision_detect import claim_file, release_file, check_collisions
+
+    if action == "claim":
+        return _with_next_steps("collision", _safe_call(
+            claim_file, file_path=file_path, model=model, task_id=task_id,
+        ))
+    if action == "release":
+        return _with_next_steps("collision", _safe_call(
+            release_file, file_path=file_path, model=model,
+        ))
+    return _with_next_steps("collision", _safe_call(check_collisions, model=model))
+
+
+@mcp.tool()
 def delimit_project_config(action: str = "load", project_path: str = ".",
                             mode: str = "advisory", preset: str = "default",
                             task_type: str = "") -> Dict[str, Any]:
