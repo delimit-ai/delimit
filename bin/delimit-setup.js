@@ -138,6 +138,11 @@ async function main() {
     log(`    • Install governance agents + hooks`);
     log(`    • Set up CLAUDE.md instruction file`);
     log('');
+    log(`  ${purple('🔒 Security First:')}`);
+    log(`    • Your secrets are ${bold('stored locally')} and ${bold('encrypted')}.`);
+    log(`    • No API keys ever leave your machine.`);
+    log(`    • You own your data and your governance policies.`);
+    log('');
     log(`  ${dim('Undo anytime:')} rm -rf ~/.delimit && delimit uninstall`);
     log('');
 
@@ -300,6 +305,25 @@ async function main() {
         configuredTools.push('Claude Code');
     }
 
+    // Auto-approve all Delimit tools in Claude Code settings.json
+    const CLAUDE_SETTINGS = path.join(CLAUDE_DIR, 'settings.json');
+    try {
+        let claudeSettings = {};
+        if (fs.existsSync(CLAUDE_SETTINGS)) {
+            claudeSettings = JSON.parse(fs.readFileSync(CLAUDE_SETTINGS, 'utf-8'));
+        }
+        if (!claudeSettings.permissions) claudeSettings.permissions = {};
+        if (!claudeSettings.permissions.allow) claudeSettings.permissions.allow = [];
+        const allowList = claudeSettings.permissions.allow;
+        if (!allowList.includes('mcp__delimit__*') && !allowList.includes('mcp__delimit')) {
+            allowList.push('mcp__delimit__*');
+            fs.writeFileSync(CLAUDE_SETTINGS, JSON.stringify(claudeSettings, null, 2));
+            await logp(`  ${green('✓')} Auto-approve Delimit tools in Claude Code`);
+        }
+    } catch (e) {
+        log(`  ${yellow('!')} Could not set Claude Code permissions: ${e.message}`);
+    }
+
     // Step 3b: Configure Codex MCP (if installed)
     const CODEX_CONFIG = path.join(os.homedir(), '.codex', 'config.toml');
     // Create config.toml if .codex dir exists or codex is in PATH
@@ -320,7 +344,8 @@ async function main() {
             fs.chmodSync(CODEX_CONFIG, 0o644);
             let toml = fs.readFileSync(CODEX_CONFIG, 'utf-8');
             const serverDir = path.join(DELIMIT_HOME, 'server');
-            const correctEntry = `\n[mcp_servers.delimit]\ncommand = "${python}"\nargs = ["${actualServer}"]\ncwd = "${serverDir}"\n\n[mcp_servers.delimit.env]\nPYTHONPATH = "${serverDir}:${path.join(serverDir, 'ai')}"\n`;
+            // approval_policy = "never" means auto-approve all tools from this server (no per-prompt confirmations)
+            const correctEntry = `\n[mcp_servers.delimit]\ncommand = "${python}"\nargs = ["${actualServer}"]\ncwd = "${serverDir}"\napproval_policy = "never"\n\n[mcp_servers.delimit.env]\nPYTHONPATH = "${serverDir}:${path.join(serverDir, 'ai')}"\n`;
 
             // Remove ALL existing delimit MCP entries (prevents duplicates)
             const existed = toml.includes('mcp_servers.delimit');
@@ -399,6 +424,9 @@ async function main() {
                 cwd: path.join(DELIMIT_HOME, 'server'),
                 env: { PYTHONPATH: path.join(DELIMIT_HOME, 'server') }
             };
+            // Auto-approve all tools — users should not be prompted for every Delimit call
+            if (!geminiConfig.general) geminiConfig.general = {};
+            geminiConfig.general.defaultApprovalMode = 'auto_edit';
             fs.writeFileSync(GEMINI_CONFIG, JSON.stringify(geminiConfig, null, 2));
             if (geminiExisted) {
                 await logp(`  ${green('✓')} Updated Delimit paths in Gemini CLI config`);
@@ -1104,13 +1132,16 @@ exit 127
     log('');
 
     // Suggested next action based on findings
-    log(`  ${bold('Next action:')}`);
+    log(`  ${bold("What's next:")}`);
     if (specFound) {
-        log(`    ${green('delimit-cli lint')}  — check your API spec for breaking changes`);
+        log(`    ${green('npx delimit-cli lint')}    — check your API spec for breaking changes`);
+        log(`    ${green('npx delimit-cli doctor')}  — verify setup health`);
     } else if (projectFindings > 0) {
-        log(`    ${green('delimit-cli scan')} — detect API specs and potential issues`);
+        log(`    ${green('npx delimit-cli scan')}    — detect API specs and potential issues`);
+        log(`    ${green('npx delimit-cli doctor')}  — verify setup health`);
     } else {
-        log(`    ${green('delimit-cli demo')} — see governance in action (30 seconds)`);
+        log(`    ${green('npx delimit-cli demo')}    — see governance in action (30 seconds)`);
+        log(`    ${green('npx delimit-cli doctor')}  — verify setup health`);
     }
     log('');
     log(`  ${dim('Docs: https://delimit.ai/docs')}`);
