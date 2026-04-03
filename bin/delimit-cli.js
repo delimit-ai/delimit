@@ -440,6 +440,39 @@ program
     });
 
 program
+    .command('think [question...]')
+    .description('Run multi-model deliberation on a question')
+    .action(async (questionParts) => {
+        const question = Array.isArray(questionParts) ? questionParts.join(' ').trim() : '';
+        if (!question) {
+            console.log(chalk.yellow('Usage: delimit think <question>'));
+            console.log(chalk.gray('Example: delimit think "Should we use REST or GraphQL for the new API?"'));
+            return;
+        }
+        console.log(chalk.blue('Deliberating...'));
+        console.log(chalk.gray(`Question: ${question}`));
+        try {
+            const result = execSync(
+                `python3 -c "import sys; sys.path.insert(0, '${continuityContext.serverDir}'); from ai.deliberation import deliberate; import json; r = deliberate(question='${question.replace(/'/g, "\\'")}'); print(json.dumps(r, indent=2))"`,
+                { encoding: 'utf-8', timeout: 120000, cwd: continuityContext.serverDir }
+            );
+            const parsed = JSON.parse(result);
+            if (parsed.error) {
+                console.log(chalk.red(`Error: ${parsed.error}`));
+            } else if (parsed.synthesis) {
+                console.log(chalk.green('\nConsensus:'));
+                console.log(parsed.synthesis);
+                if (parsed.verdict) console.log(chalk.blue(`\nVerdict: ${parsed.verdict}`));
+                if (parsed.confidence) console.log(chalk.gray(`Confidence: ${parsed.confidence}`));
+            } else {
+                console.log(JSON.stringify(parsed, null, 2));
+            }
+        } catch (e) {
+            console.log(chalk.red(`Deliberation failed: ${e.message}`));
+        }
+    });
+
+program
     .command('open [venture]')
     .description('Open a venture session without changing directories')
     .option('--build', 'Open directly in build mode')
