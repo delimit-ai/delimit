@@ -270,6 +270,22 @@ rules:
 
 ---
 
+## FAQ
+
+**How does this compare to Obsidian Mind?**
+
+Obsidian Mind is a great Obsidian vault template for Claude Code users who want persistent memory via markdown files. Delimit takes a different approach: it's an MCP server that works across Claude Code, Codex, Gemini CLI, and Cursor. Your memory, ledger, and governance travel with you when you switch models. Delimit also adds API governance (27-type breaking change detection), CI gates, git hooks, and policy enforcement that Obsidian Mind doesn't cover. Use Obsidian Mind if you're all-in on Claude + Obsidian. Use Delimit if you switch between models or need governance.
+
+**Does this work without Claude Code?**
+
+Yes. Delimit works with Claude Code, Codex (OpenAI), Gemini CLI (Google), and Cursor. The `remember`/`recall` commands work standalone with zero config. The MCP server integrates with any client that supports the Model Context Protocol.
+
+**Is this free?**
+
+The free tier includes API governance, persistent memory, zero-spec extraction, project scanning, and 3 multi-model deliberations. Pro ($10/mo) adds unlimited deliberation, security audit, test verification, deploy pipeline, and agent orchestration.
+
+---
+
 ## Links
 
 - [delimit.ai](https://delimit.ai) -- homepage
