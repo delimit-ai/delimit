@@ -19,17 +19,6 @@ class CIFormatter:
     def __init__(self, format_type: OutputFormat = OutputFormat.TEXT):
         self.format_type = format_type
     
-    def format_result(self, result: Dict[str, Any]) -> str:
-        """Format the complete result based on output type."""
-        if self.format_type == OutputFormat.JSON:
-            return json.dumps(result, indent=2)
-        elif self.format_type == OutputFormat.MARKDOWN:
-            return self._format_markdown(result)
-        elif self.format_type == OutputFormat.GITHUB_ANNOTATION:
-            return self._format_github_annotations(result)
-        else:
-            return self._format_text(result)
-    
     def _format_text(self, result: Dict[str, Any]) -> str:
         """Format as plain text for terminal output."""
         lines = []
@@ -222,6 +211,17 @@ class CIFormatter:
             annotations.append(f"::warning::Delimit found {summary.get('violations', 0)} warnings")
         
         return "\n".join(annotations)
+    
+    def format_result(self, result: Dict[str, Any]) -> str:
+        """Format the complete result based on output type."""
+        if self.format_type == OutputFormat.JSON:
+            return json.dumps(result, indent=2)
+        elif self.format_type == OutputFormat.MARKDOWN:
+            return self._format_markdown(result)
+        elif self.format_type == OutputFormat.GITHUB_ANNOTATION:
+            return self._format_github_annotations(result)
+        else:
+            return self._format_text(result)
 
 
 class PRCommentGenerator:
