@@ -5,48 +5,6 @@ from schemas.base import TaskRequest
 
 register_task = task_registry.register
 
-@register_task("check-policy", version="v1", description="Check API against policy rules")
-def check_policy_handler(request: TaskRequest) -> Dict[str, Any]:
-    """Validate API specification against organizational policies"""
-    
-    files = request.files
-    if not files:
-        raise ValueError("check-policy requires at least one API spec file")
-    
-    # Load policy from config or use defaults
-    policy = request.config.get("policy", get_default_policy())
-    if isinstance(policy, str):
-        # If policy is a file path, load it
-        policy = load_policy(policy)
-    
-    violations = []
-    warnings = []
-    passed_checks = []
-    
-    for file_path in files:
-        spec = load_spec(file_path)
-        
-        # Check various policy rules
-        violations_found, warnings_found, passed = check_spec_against_policy(spec, policy)
-        violations.extend(violations_found)
-        warnings.extend(warnings_found)
-        passed_checks.extend(passed)
-    
-    compliance_score = calculate_compliance_score(violations, warnings, passed_checks)
-    
-    return {
-        "compliant": len(violations) == 0,
-        "violations": violations,
-        "warnings": warnings,
-        "passed_checks": passed_checks,
-        "compliance_score": compliance_score,
-        "summary": {
-            "total_violations": len(violations),
-            "total_warnings": len(warnings),
-            "total_passed": len(passed_checks)
-        }
-    }
-
 def load_spec(file_path: str) -> Dict:
     """Load API specification"""
     with open(file_path, 'r') as f:
@@ -175,3 +133,45 @@ def calculate_compliance_score(violations: List, warnings: List, passed: List) -
     score -= len(warnings) * 2
     
     return max(0, score)
+
+@register_task("check-policy", version="v1", description="Check API against policy rules")
+def check_policy_handler(request: TaskRequest) -> Dict[str, Any]:
+    """Validate API specification against organizational policies"""
+    
+    files = request.files
+    if not files:
+        raise ValueError("check-policy requires at least one API spec file")
+    
+    # Load policy from config or use defaults
+    policy = request.config.get("policy", get_default_policy())
+    if isinstance(policy, str):
+        # If policy is a file path, load it
+        policy = load_policy(policy)
+    
+    violations = []
+    warnings = []
+    passed_checks = []
+    
+    for file_path in files:
+        spec = load_spec(file_path)
+        
+        # Check various policy rules
+        violations_found, warnings_found, passed = check_spec_against_policy(spec, policy)
+        violations.extend(violations_found)
+        warnings.extend(warnings_found)
+        passed_checks.extend(passed)
+    
+    compliance_score = calculate_compliance_score(violations, warnings, passed_checks)
+    
+    return {
+        "compliant": len(violations) == 0,
+        "violations": violations,
+        "warnings": warnings,
+        "passed_checks": passed_checks,
+        "compliance_score": compliance_score,
+        "summary": {
+            "total_violations": len(violations),
+            "total_warnings": len(warnings),
+            "total_passed": len(passed_checks)
+        }
+    }
