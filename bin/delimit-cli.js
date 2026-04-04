@@ -4159,6 +4159,267 @@ if result.get('summary'):
         }
     });
 
+// ---------------------------------------------------------------------------
+// Models command: BYOK deliberation key management wizard
+// ---------------------------------------------------------------------------
+
+const MODELS_CONFIG_PATH = path.join(os.homedir(), '.delimit', 'models.json');
+const DELIBERATION_USAGE_PATH = path.join(os.homedir(), '.delimit', 'deliberation_usage.json');
+
+const DEFAULT_MODELS = {
+    grok: { enabled: false, api_key: '', model: 'grok-4-0709', name: 'Grok 4' },
+    gemini: { enabled: false, api_key: '', model: 'gemini-2.5-pro', name: 'Gemini Pro' },
+    openai: { enabled: false, api_key: '', model: 'gpt-4o', name: 'Codex (GPT-4o)' },
+};
+
+const MODEL_PROVIDERS = {
+    grok: { label: 'Grok (xAI)', prefix: 'xai-', endpoint: 'https://api.x.ai/v1/chat/completions', defaultModel: 'grok-4-0709', defaultName: 'Grok 4', variants: ['grok-4-0709', 'grok-3', 'grok-3-mini'] },
+    gemini: { label: 'Gemini (Google)', prefix: 'AIza', endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent', defaultModel: 'gemini-2.5-pro', defaultName: 'Gemini Pro', variants: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'] },
+    openai: { label: 'Codex/GPT-4o (OpenAI)', prefix: 'sk-', endpoint: 'https://api.openai.com/v1/chat/completions', defaultModel: 'gpt-4o', defaultName: 'Codex (GPT-4o)', variants: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o3-mini'] },
+};
+
+function loadModelsConfig() {
+    try {
+        if (fs.existsSync(MODELS_CONFIG_PATH)) {
+            return JSON.parse(fs.readFileSync(MODELS_CONFIG_PATH, 'utf-8'));
+        }
+    } catch {}
+    return {};
+}
+
+function saveModelsConfig(config) {
+    const dir = path.dirname(MODELS_CONFIG_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(MODELS_CONFIG_PATH, JSON.stringify(config, null, 2));
+}
+
+function loadDeliberationUsage() {
+    try {
+        if (fs.existsSync(DELIBERATION_USAGE_PATH)) {
+            return JSON.parse(fs.readFileSync(DELIBERATION_USAGE_PATH, 'utf-8'));
+        }
+    } catch {}
+    return { used: 0, limit: 3 };
+}
+
+function getModelStatus(config, key) {
+    const entry = config[key];
+    if (entry && entry.enabled && entry.api_key) {
+        return { configured: true, model: entry.model || DEFAULT_MODELS[key].model };
+    }
+    return { configured: false, model: null };
+}
+
+function printModelStatus(config) {
+    const usage = loadDeliberationUsage();
+    const remaining = Math.max(0, (usage.limit || 3) - (usage.used || 0));
+    let configuredCount = 0;
+
+    console.log(chalk.bold.blue('\n  Delimit Models -- Deliberation Config\n'));
+    console.log(chalk.bold('  Current models:'));
+
+    for (const [key, defaults] of Object.entries(DEFAULT_MODELS)) {
+        const status = getModelStatus(config, key);
+        if (status.configured) {
+            configuredCount++;
+            console.log(`    ${chalk.green('*')} ${defaults.name.split(' ')[0].padEnd(10)} -- configured (${status.model})`);
+        } else {
+            const extra = key === 'openai' ? '' : '';
+            console.log(`    ${chalk.gray('o')} ${defaults.name.split(' ')[0].padEnd(10)} -- ${chalk.gray('not configured')}${extra}`);
+        }
+    }
+    console.log(`    ${chalk.gray('o')} ${'Claude'.padEnd(10)} -- ${chalk.gray('not configured (uses your Claude Code subscription)')}`);
+
+    console.log('');
+    console.log(`  ${remaining} free deliberation${remaining === 1 ? '' : 's'} remaining (of ${usage.limit || 3}).`);
+    if (configuredCount > 0) {
+        console.log(`  Mode: ${chalk.green('BYOK')} (${configuredCount} model${configuredCount === 1 ? '' : 's'})`);
+    } else {
+        console.log('  Add API keys for unlimited deliberation with your own models.');
+    }
+    console.log('');
+
+    return { configuredCount, remaining };
+}
+
+async function testModelKey(providerKey, apiKey, model) {
+    const provider = MODEL_PROVIDERS[providerKey];
+    const prompt = 'What is 2+2? Reply with just the number.';
+
+    try {
+        if (providerKey === 'gemini') {
+            const url = provider.endpoint.replace('{model}', model) + `?key=${apiKey}`;
+            const resp = await axios.post(url, {
+                contents: [{ parts: [{ text: prompt }] }],
+            }, { timeout: 15000, headers: { 'Content-Type': 'application/json' } });
+            const text = resp.data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            return { ok: true, response: text.trim() };
+        } else {
+            const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` };
+            const body = { model, messages: [{ role: 'user', content: prompt }], max_tokens: 10 };
+            const resp = await axios.post(provider.endpoint, body, { timeout: 15000, headers });
+            const text = resp.data?.choices?.[0]?.message?.content || '';
+            return { ok: true, response: text.trim() };
+        }
+    } catch (err) {
+        const status = err.response?.status;
+        const msg = err.response?.data?.error?.message || err.message || 'Unknown error';
+        return { ok: false, error: `${status ? `HTTP ${status}: ` : ''}${msg}` };
+    }
+}
+
+program
+    .command('models')
+    .description('Configure deliberation model API keys (BYOK)')
+    .option('--status', 'Show current model configuration (non-interactive)')
+    .action(async (options) => {
+        const config = loadModelsConfig();
+
+        // --status: non-interactive output
+        if (options.status) {
+            let configuredCount = 0;
+            console.log('');
+            for (const [key, defaults] of Object.entries(DEFAULT_MODELS)) {
+                const status = getModelStatus(config, key);
+                const label = defaults.name.split(' ')[0] + ':';
+                if (status.configured) {
+                    configuredCount++;
+                    console.log(`  ${label.padEnd(10)} configured (${status.model})`);
+                } else {
+                    console.log(`  ${label.padEnd(10)} ${chalk.gray('not configured')}`);
+                }
+            }
+            console.log(`  ${'Mode:'.padEnd(10)} ${configuredCount > 0 ? `BYOK (${configuredCount} model${configuredCount === 1 ? '' : 's'})` : 'free tier'}`);
+            console.log('');
+            return;
+        }
+
+        // Interactive wizard
+        printModelStatus(config);
+
+        let running = true;
+        while (running) {
+            const choices = [
+                { name: 'Add Grok (xAI)', value: 'add_grok' },
+                { name: 'Add Gemini (Google)', value: 'add_gemini' },
+                { name: 'Add Codex/GPT-4o (OpenAI)', value: 'add_openai' },
+                new inquirer.Separator(),
+                { name: 'Remove a model', value: 'remove' },
+                { name: 'Test deliberation', value: 'test' },
+                { name: 'Exit', value: 'exit' },
+            ];
+
+            const { action } = await inquirer.prompt([{
+                type: 'list',
+                name: 'action',
+                message: 'Configure a model:',
+                choices,
+            }]);
+
+            if (action === 'exit') {
+                running = false;
+                break;
+            }
+
+            if (action.startsWith('add_')) {
+                const providerKey = action.replace('add_', '');
+                const provider = MODEL_PROVIDERS[providerKey];
+                const existing = config[providerKey];
+
+                // Warn if already configured
+                if (existing && existing.enabled && existing.api_key) {
+                    const { overwrite } = await inquirer.prompt([{
+                        type: 'confirm',
+                        name: 'overwrite',
+                        message: `${provider.label} is already configured. Overwrite?`,
+                        default: false,
+                    }]);
+                    if (!overwrite) continue;
+                }
+
+                // Prompt for API key
+                const { apiKey } = await inquirer.prompt([{
+                    type: 'password',
+                    name: 'apiKey',
+                    message: `Enter your ${provider.label} API key:`,
+                    mask: '*',
+                    validate: (input) => {
+                        if (!input || input.trim().length === 0) return 'API key cannot be empty.';
+                        if (!input.startsWith(provider.prefix)) {
+                            return `Key should start with "${provider.prefix}". Got: "${input.slice(0, 6)}..."`;
+                        }
+                        return true;
+                    },
+                }]);
+
+                // Optionally choose model variant
+                const { modelChoice } = await inquirer.prompt([{
+                    type: 'list',
+                    name: 'modelChoice',
+                    message: 'Select model:',
+                    choices: provider.variants.map(v => ({ name: v === provider.defaultModel ? `${v} (default)` : v, value: v })),
+                    default: provider.defaultModel,
+                }]);
+
+                config[providerKey] = {
+                    enabled: true,
+                    api_key: apiKey.trim(),
+                    model: modelChoice,
+                    name: provider.defaultName,
+                };
+                saveModelsConfig(config);
+                console.log(chalk.green(`\n  ${provider.label} configured with model ${modelChoice}.\n`));
+            }
+
+            if (action === 'remove') {
+                const configuredModels = Object.entries(config)
+                    .filter(([, v]) => v && v.enabled && v.api_key)
+                    .map(([k]) => ({ name: `${DEFAULT_MODELS[k]?.name || k} (${config[k].model})`, value: k }));
+
+                if (configuredModels.length === 0) {
+                    console.log(chalk.yellow('\n  No models configured to remove.\n'));
+                    continue;
+                }
+
+                const { toRemove } = await inquirer.prompt([{
+                    type: 'list',
+                    name: 'toRemove',
+                    message: 'Select model to remove:',
+                    choices: configuredModels,
+                }]);
+
+                config[toRemove] = { enabled: false, api_key: '', model: DEFAULT_MODELS[toRemove].model, name: DEFAULT_MODELS[toRemove].name };
+                saveModelsConfig(config);
+                console.log(chalk.green(`\n  ${DEFAULT_MODELS[toRemove].name} removed.\n`));
+            }
+
+            if (action === 'test') {
+                const configuredModels = Object.entries(config)
+                    .filter(([, v]) => v && v.enabled && v.api_key);
+
+                if (configuredModels.length === 0) {
+                    console.log(chalk.yellow('\n  No models configured. Add a model first.\n'));
+                    continue;
+                }
+
+                console.log(chalk.blue('\n  Testing deliberation models...\n'));
+                console.log(chalk.gray('  Prompt: "What is 2+2?"\n'));
+
+                for (const [key, entry] of configuredModels) {
+                    const label = (entry.name || key).padEnd(18);
+                    process.stdout.write(`  ${label} `);
+                    const result = await testModelKey(key, entry.api_key, entry.model);
+                    if (result.ok) {
+                        console.log(chalk.green(`pass`) + chalk.gray(` -- "${result.response}"`));
+                    } else {
+                        console.log(chalk.red(`fail`) + chalk.gray(` -- ${result.error}`));
+                    }
+                }
+                console.log('');
+            }
+        }
+    });
+
 // Version subcommand alias (users type 'delimit version' not 'delimit -V')
 program
     .command('version')
@@ -4297,18 +4558,80 @@ function extractTags(text) {
 }
 
 function readMemories() {
-    if (!fs.existsSync(MEMORY_FILE)) return [];
-    const lines = fs.readFileSync(MEMORY_FILE, 'utf-8').split('\n').filter(l => l.trim());
+    if (!fs.existsSync(MEMORY_DIR)) return [];
     const memories = [];
-    for (const line of lines) {
-        try { memories.push(JSON.parse(line)); } catch {}
+
+    // Read individual .json files (MCP format — primary)
+    try {
+        const files = fs.readdirSync(MEMORY_DIR).filter(f => f.endsWith('.json') && f.startsWith('mem-'));
+        for (const f of files) {
+            try {
+                const entry = JSON.parse(fs.readFileSync(path.join(MEMORY_DIR, f), 'utf-8'));
+                // Normalize: MCP uses "content", CLI used "text"
+                if (entry.content && !entry.text) entry.text = entry.content;
+                if (entry.text && !entry.content) entry.content = entry.text;
+                if (entry.created_at && !entry.created) entry.created = entry.created_at;
+                if (entry.created && !entry.created_at) entry.created_at = entry.created;
+                memories.push(entry);
+            } catch {}
+        }
+    } catch {}
+
+    // Also read legacy .jsonl file (CLI format — backwards compat)
+    if (fs.existsSync(MEMORY_FILE)) {
+        const lines = fs.readFileSync(MEMORY_FILE, 'utf-8').split('\n').filter(l => l.trim());
+        for (const line of lines) {
+            try {
+                const entry = JSON.parse(line);
+                // Skip if already loaded from .json file
+                if (!memories.find(m => m.id === entry.id)) {
+                    if (entry.text && !entry.content) entry.content = entry.text;
+                    if (entry.created && !entry.created_at) entry.created_at = entry.created;
+                    memories.push(entry);
+                }
+            } catch {}
+        }
     }
+
+    // Sort by created date, newest first
+    memories.sort((a, b) => new Date(b.created_at || b.created || 0) - new Date(a.created_at || a.created || 0));
     return memories;
 }
 
-function writeMemories(memories) {
+function writeMemory(entry) {
+    // Write in MCP-compatible format (individual .json files)
     fs.mkdirSync(MEMORY_DIR, { recursive: true });
-    fs.writeFileSync(MEMORY_FILE, memories.map(m => JSON.stringify(m)).join('\n') + (memories.length ? '\n' : ''));
+    const memId = 'mem-' + require('crypto').createHash('sha256').update(entry.text.slice(0, 100)).digest('hex').slice(0, 12);
+    const mcpEntry = {
+        id: memId,
+        content: entry.text,
+        tags: entry.tags || [],
+        context: entry.source || 'cli',
+        created_at: entry.created || new Date().toISOString(),
+    };
+    fs.writeFileSync(path.join(MEMORY_DIR, `${memId}.json`), JSON.stringify(mcpEntry, null, 2));
+    return memId;
+}
+
+function deleteMemory(id) {
+    // Delete from .json files
+    const jsonFile = path.join(MEMORY_DIR, `${id}.json`);
+    if (fs.existsSync(jsonFile)) {
+        fs.unlinkSync(jsonFile);
+        return true;
+    }
+    // Also check legacy .jsonl
+    if (fs.existsSync(MEMORY_FILE)) {
+        const lines = fs.readFileSync(MEMORY_FILE, 'utf-8').split('\n').filter(l => l.trim());
+        const filtered = lines.filter(l => {
+            try { return JSON.parse(l).id !== id; } catch { return true; }
+        });
+        if (filtered.length < lines.length) {
+            fs.writeFileSync(MEMORY_FILE, filtered.join('\n') + (filtered.length ? '\n' : ''));
+            return true;
+        }
+    }
+    return false;
 }
 
 function relativeTime(isoDate) {
@@ -4349,18 +4672,16 @@ program
         const manualTags = (options.tag || []).map(t => t.toLowerCase());
         const allTags = [...new Set([...autoTags, ...manualTags])];
 
-        const memories = readMemories();
         const entry = {
-            id: generateShortId(),
             text,
             tags: allTags,
             created: new Date().toISOString(),
             source: 'cli',
         };
-        memories.push(entry);
-        writeMemories(memories);
+        writeMemory(entry);
+        const total = readMemories().length;
 
-        console.log(chalk.green(`\n  Remembered.`) + chalk.gray(` (${memories.length} memor${memories.length === 1 ? 'y' : 'ies'} total)\n`));
+        console.log(chalk.green(`\n  Remembered.`) + chalk.gray(` (${total} memor${total === 1 ? 'y' : 'ies'} total)\n`));
     });
 
 program
@@ -4375,14 +4696,13 @@ program
 
         // --forget mode
         if (options.forget) {
-            const idx = memories.findIndex(m => m.id === options.forget);
-            if (idx === -1) {
+            if (deleteMemory(options.forget)) {
+                const remaining = readMemories().length;
+                console.log(chalk.green(`\n  Forgotten.`) + chalk.gray(` (${remaining} memor${remaining === 1 ? 'y' : 'ies'} remaining)\n`));
+            } else {
                 console.log(chalk.red(`\n  No memory found with ID: ${options.forget}\n`));
                 process.exit(1);
             }
-            memories.splice(idx, 1);
-            writeMemories(memories);
-            console.log(chalk.green(`\n  Forgotten.`) + chalk.gray(` (${memories.length} memor${memories.length === 1 ? 'y' : 'ies'} remaining)\n`));
             return;
         }
 
@@ -4454,15 +4774,13 @@ program
     .command('forget <id>')
     .description('Delete a memory by ID (alias for recall --forget)')
     .action((id) => {
-        const memories = readMemories();
-        const idx = memories.findIndex(m => m.id === id);
-        if (idx === -1) {
+        if (deleteMemory(id)) {
+            const remaining = readMemories().length;
+            console.log(chalk.green(`\n  Forgotten.`) + chalk.gray(` (${remaining} memor${remaining === 1 ? 'y' : 'ies'} remaining)\n`));
+        } else {
             console.log(chalk.red(`\n  No memory found with ID: ${id}\n`));
             process.exit(1);
         }
-        memories.splice(idx, 1);
-        writeMemories(memories);
-        console.log(chalk.green(`\n  Forgotten.`) + chalk.gray(` (${memories.length} memor${memories.length === 1 ? 'y' : 'ies'} remaining)\n`));
     });
 
 const normalizedArgs = normalizeNaturalLanguageArgs(process.argv);
