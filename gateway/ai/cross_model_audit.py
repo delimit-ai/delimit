@@ -104,6 +104,21 @@ def _resolve_target(target: str, target_type: str) -> Tuple[str, Optional[str]]:
         return "", f"Unknown target_type: {target_type}. Use 'file', 'diff', or 'snippet'."
 
 
+def _validate_findings(findings: List, model_name: str) -> List[Dict[str, str]]:
+    """Validate and normalize finding objects."""
+    validated = []
+    for f in findings:
+        if not isinstance(f, dict):
+            continue
+        validated.append({
+            "severity": str(f.get("severity", "info")).lower(),
+            "location": str(f.get("location", "unknown")),
+            "finding": str(f.get("finding", "")),
+            "recommendation": str(f.get("recommendation", "")),
+        })
+    return validated
+
+
 def _parse_model_findings(raw_response: str, model_name: str) -> List[Dict[str, str]]:
     """Parse structured findings from a model response.
 
@@ -145,21 +160,6 @@ def _parse_model_findings(raw_response: str, model_name: str) -> List[Dict[str, 
         "finding": f"[Unstructured response from {model_name}]: {raw_response[:500]}",
         "recommendation": "Review raw model output manually.",
     }]
-
-
-def _validate_findings(findings: List, model_name: str) -> List[Dict[str, str]]:
-    """Validate and normalize finding objects."""
-    validated = []
-    for f in findings:
-        if not isinstance(f, dict):
-            continue
-        validated.append({
-            "severity": str(f.get("severity", "info")).lower(),
-            "location": str(f.get("location", "unknown")),
-            "finding": str(f.get("finding", "")),
-            "recommendation": str(f.get("recommendation", "")),
-        })
-    return validated
 
 
 def _call_model_with_lens(
@@ -491,6 +491,23 @@ def _select_models_and_lenses(
     return assignments, None
 
 
+def _save_audit(audit_results: Dict[str, Any], timestamp: str) -> Optional[str]:
+    """Save audit results to ~/.delimit/audits/."""
+    try:
+        AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+        path = AUDIT_DIR / f"{timestamp}.json"
+        # Remove raw_response before saving (can be large)
+        save_data = json.loads(json.dumps(audit_results, default=str))
+        for r in save_data.get("model_results", []):
+            r.pop("raw_response", None)
+        path.write_text(json.dumps(save_data, indent=2, default=str))
+        audit_results["saved_to"] = str(path)
+        return str(path)
+    except Exception as e:
+        logger.warning("Failed to save audit results: %s", e)
+        return None
+
+
 def audit(
     target: str,
     target_type: str = "file",
@@ -581,20 +598,3 @@ def audit(
     _save_audit(audit_results, timestamp)
 
     return audit_results
-
-
-def _save_audit(audit_results: Dict[str, Any], timestamp: str) -> Optional[str]:
-    """Save audit results to ~/.delimit/audits/."""
-    try:
-        AUDIT_DIR.mkdir(parents=True, exist_ok=True)
-        path = AUDIT_DIR / f"{timestamp}.json"
-        # Remove raw_response before saving (can be large)
-        save_data = json.loads(json.dumps(audit_results, default=str))
-        for r in save_data.get("model_results", []):
-            r.pop("raw_response", None)
-        path.write_text(json.dumps(save_data, indent=2, default=str))
-        audit_results["saved_to"] = str(path)
-        return str(path)
-    except Exception as e:
-        logger.warning("Failed to save audit results: %s", e)
-        return None
