@@ -16,6 +16,41 @@ from schemas.evidence import (
 )
 
 
+def load_spec(file_path: str) -> Dict:
+    """Load API specification from file"""
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Spec file not found: {file_path}\n"
+            f"If the spec was deleted, ensure both old and new spec paths exist before running validation."
+        )
+    with path.open('r') as f:
+        if path.suffix in ['.yaml', '.yml']:
+            return yaml.safe_load(f)
+        elif path.suffix == '.json':
+            return json.load(f)
+        else:
+            # Try YAML first, then JSON
+            content = f.read()
+            try:
+                return yaml.safe_load(content)
+            except:
+                return json.loads(content)
+
+
+def extract_parameters(operation: Dict) -> List[Dict]:
+    """Extract parameters from an operation"""
+    params = operation.get("parameters", [])
+    # Also check requestBody for required fields
+    if "requestBody" in operation and operation["requestBody"].get("required", False):
+        params.append({
+            "name": "requestBody",
+            "required": True,
+            "in": "body"
+        })
+    return params
+
+
 @task_registry.register("validate-api", version="1.0", description="Check API for breaking changes")
 def validate_api_handler(request: ValidateAPIRequest) -> APIChangeEvidence:
     """Check API specifications for breaking changes with evidence contract"""
@@ -171,38 +206,3 @@ def validate_api_handler(request: ValidateAPIRequest) -> APIChangeEvidence:
         non_breaking_changes=non_breaking_changes,
         risk_score=risk_score
     )
-
-
-def load_spec(file_path: str) -> Dict:
-    """Load API specification from file"""
-    path = Path(file_path)
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Spec file not found: {file_path}\n"
-            f"If the spec was deleted, ensure both old and new spec paths exist before running validation."
-        )
-    with path.open('r') as f:
-        if path.suffix in ['.yaml', '.yml']:
-            return yaml.safe_load(f)
-        elif path.suffix == '.json':
-            return json.load(f)
-        else:
-            # Try YAML first, then JSON
-            content = f.read()
-            try:
-                return yaml.safe_load(content)
-            except:
-                return json.loads(content)
-
-
-def extract_parameters(operation: Dict) -> List[Dict]:
-    """Extract parameters from an operation"""
-    params = operation.get("parameters", [])
-    # Also check requestBody for required fields
-    if "requestBody" in operation and operation["requestBody"].get("required", False):
-        params.append({
-            "name": "requestBody",
-            "required": True,
-            "in": "body"
-        })
-    return params
