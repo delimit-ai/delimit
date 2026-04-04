@@ -1312,7 +1312,7 @@ program
 
         if (fs.existsSync(policyFile)) {
             console.log(chalk.yellow('  Already initialized — .delimit/policies.yml exists'));
-            console.log(`  Run ${chalk.bold('delimit lint')} to check your API.\n`);
+            console.log(`  Run ${chalk.bold('npx delimit-cli lint')} to check your API.\n`);
             return;
         }
 
@@ -1723,7 +1723,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: 'API Drift Detected — Governance Review Needed',
-              body: 'The weekly drift monitor detected changes to the API spec that have not been reviewed through governance. Run delimit lint to review.',
+              body: 'The weekly drift monitor detected changes to the API spec that have not been reviewed through governance. Run npx delimit-cli lint to review.',
               labels: ['api-governance', 'drift'],
             });
 `;
@@ -1781,10 +1781,10 @@ jobs:
                         console.log(chalk.green('  Saved baseline to .delimit/baseline.yaml'));
                     }
                 } else {
-                    console.log(chalk.gray('  Zero-Spec extraction skipped — run `delimit lint` manually'));
+                    console.log(chalk.gray('  Zero-Spec extraction skipped — run `npx delimit-cli lint` manually'));
                 }
             } catch {
-                console.log(chalk.gray('  Zero-Spec extraction skipped — run `delimit lint` manually'));
+                console.log(chalk.gray('  Zero-Spec extraction skipped — run `npx delimit-cli lint` manually'));
             }
         }
 
@@ -1878,11 +1878,11 @@ jobs:
         console.log(chalk.gray(`  Evidence saved to .delimit/evidence/\n`));
         console.log('  Next steps:');
         if (specPath) {
-            console.log(`    ${chalk.bold('delimit lint')} ${specPath} ${specPath}  — lint on every PR`);
+            console.log(`    ${chalk.bold('npx delimit-cli lint')} ${specPath} ${specPath}  — lint on every PR`);
         } else if (['fastapi', 'nestjs', 'express'].includes(framework)) {
-            console.log(`    ${chalk.bold('delimit lint')}                           — zero-spec mode (${frameworkLabel})`);
+            console.log(`    ${chalk.bold('npx delimit-cli lint')}                           — zero-spec mode (${frameworkLabel})`);
         } else {
-            console.log(`    ${chalk.bold('delimit lint')}                           — add an OpenAPI spec first`);
+            console.log(`    ${chalk.bold('npx delimit-cli lint')}                           — add an OpenAPI spec first`);
         }
         console.log(`    ${chalk.bold('delimit doctor')}                         — verify setup`);
         console.log(`    ${chalk.bold('delimit explain')}                        — human-readable report`);
@@ -2175,7 +2175,7 @@ program
                 console.log(chalk.green('  Spec validated — no breaking changes'));
             }
         } else {
-            console.log(chalk.yellow('  No spec files found. Run delimit lint manually.'));
+            console.log(chalk.yellow('  No spec files found. Run npx delimit-cli lint manually.'));
         }
 
         // Step 4: Show what to do next
@@ -2326,6 +2326,201 @@ program
         console.log(chalk.bold('  Start here:'));
         console.log(`    ${chalk.green('Ask your AI:')} "Check the ledger and work on the highest priority item"`);
         console.log('');
+    });
+
+// Scan command — instant governance analysis of any project or spec
+program
+    .command('scan [path]')
+    .description('Scan a project or OpenAPI spec for governance insights')
+    .action(async (specPath) => {
+        const target = specPath ? path.resolve(specPath) : process.cwd();
+        console.log(chalk.bold('\n  Delimit Scan\n'));
+
+        // Resolve gateway dir: installed server > bundled in npm package
+        const bundledGateway = path.join(__dirname, '..', 'gateway');
+        const serverDir = (continuityContext.serverDir && continuityContext.serverDir !== 'undefined' && fs.existsSync(continuityContext.serverDir))
+            ? continuityContext.serverDir
+            : fs.existsSync(bundledGateway) ? bundledGateway : null;
+
+        if (!serverDir) {
+            console.log(chalk.yellow('  Gateway not found. Installing...\n'));
+            try {
+                execSync('npx delimit-cli setup --yes', { stdio: 'inherit', timeout: 60000 });
+                // Retry after setup
+                console.log(chalk.green('\n  Setup complete. Re-running scan...\n'));
+                execSync(`npx delimit-cli scan ${specPath || ''}`, { stdio: 'inherit', timeout: 30000 });
+            } catch {
+                console.log(chalk.red('\n  Auto-setup failed. Run manually: npx delimit-cli setup'));
+            }
+            return;
+        }
+
+        // Check Python + yaml dependency
+        try {
+            execSync('python3 -c "import yaml"', { stdio: 'ignore', timeout: 5000 });
+        } catch {
+            console.log(chalk.yellow('  Installing Python dependency (pyyaml)...\n'));
+            try { execSync('pip3 install pyyaml -q', { stdio: 'ignore', timeout: 30000 }); } catch {}
+        }
+
+        // Detect if target is a spec file or a project directory
+        const isFile = fs.existsSync(target) && fs.statSync(target).isFile();
+
+        if (isFile) {
+            // Spec file — run spec health + show results
+            console.log(chalk.gray(`  Analyzing ${target}...\n`));
+            try {
+                const result = execSync(
+                    `python3 -c "import sys,json; sys.path.insert(0,'${serverDir}'); from core.spec_health import score_spec; import yaml; spec=yaml.safe_load(open('${target}')); r=score_spec(spec); print(json.dumps(r))"`,
+                    { encoding: 'utf-8', timeout: 15000, cwd: serverDir }
+                );
+                const health = JSON.parse(result);
+                const gradeColors = { A: 'green', B: 'blue', C: 'yellow', D: 'red', F: 'red' };
+                const gradeColor = gradeColors[health.grade] || 'white';
+                console.log(`  ${chalk[gradeColor].bold(health.grade)} ${chalk.white.bold(health.overall_score + '/100')}  ${chalk.gray('Spec Health Score')}\n`);
+                for (const [dim, data] of Object.entries(health.dimensions || {})) {
+                    const score = data.score || 0;
+                    const bar = '█'.repeat(Math.round(score / 5)) + '░'.repeat(20 - Math.round(score / 5));
+                    const color = score >= 70 ? 'green' : score >= 40 ? 'yellow' : 'red';
+                    console.log(`  ${chalk.gray(dim.padEnd(16))} ${chalk[color](bar)} ${score}`);
+                }
+                if (health.recommendations && health.recommendations.length > 0) {
+                    console.log(chalk.bold('\n  Recommendations:\n'));
+                    health.recommendations.slice(0, 5).forEach(r => {
+                        const text = typeof r === 'object' ? (r.recommendation || r.text || JSON.stringify(r)) : r;
+                        console.log(`  ${chalk.yellow('→')} ${text}`);
+                    });
+                }
+                // Interactive next step picker
+                try {
+                    const { next } = await inquirer.prompt([{
+                        type: 'list',
+                        name: 'next',
+                        message: '\n  What next?\n',
+                        choices: [
+                            { name: `Lint this spec for breaking changes`, value: 'lint' },
+                            { name: 'Set up governance for this project', value: 'init' },
+                            { name: 'Configure AI assistants (Claude, Codex, Gemini)', value: 'setup' },
+                            { name: 'Exit', value: 'exit' },
+                        ],
+                    }]);
+                    if (next === 'lint') {
+                        execSync(`npx delimit-cli lint ${target}`, { stdio: 'inherit' });
+                    } else if (next === 'init') {
+                        execSync('npx delimit-cli init', { stdio: 'inherit' });
+                    } else if (next === 'setup') {
+                        execSync('npx delimit-cli setup', { stdio: 'inherit' });
+                    }
+                } catch {}
+            } catch (e) {
+                console.log(chalk.red(`  Error: ${e.message}`));
+            }
+        } else {
+            // Project directory — find specs using simple glob, no server.py needed
+            console.log(chalk.gray(`  Scanning ${target}...\n`));
+            try {
+                // Find OpenAPI/Swagger specs
+                const specPatterns = ['openapi.yaml', 'openapi.yml', 'openapi.json', 'swagger.yaml', 'swagger.yml', 'swagger.json'];
+                const found = [];
+                const _findSpecs = (dir, depth) => {
+                    if (depth > 4) return;
+                    try {
+                        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                            if (entry.name === 'node_modules' || entry.name === '.next' || entry.name === 'venv' || entry.name === '.git') continue;
+                            const full = path.join(dir, entry.name);
+                            if (entry.isFile() && specPatterns.includes(entry.name.toLowerCase())) {
+                                found.push(path.relative(target, full));
+                            } else if (entry.isDirectory()) {
+                                _findSpecs(full, depth + 1);
+                            }
+                        }
+                    } catch {}
+                };
+                _findSpecs(target, 0);
+
+                if (found.length > 0) {
+                    console.log(`  ${chalk.green('✓')} Found ${found.length} OpenAPI spec(s): ${found.slice(0, 3).join(', ')}`);
+                    // Run health on the first spec
+                    const specFile = path.join(target, found[0]);
+                    console.log(chalk.gray(`\n  Scoring ${found[0]}...\n`));
+                    try {
+                        const healthResult = execSync(
+                            `python3 -c "import sys,json; sys.path.insert(0,'${serverDir}'); from core.spec_health import score_spec; import yaml; spec=yaml.safe_load(open('${specFile}')); r=score_spec(spec); print(json.dumps(r))"`,
+                            { encoding: 'utf-8', timeout: 15000, cwd: serverDir }
+                        );
+                        const health = JSON.parse(healthResult);
+                        const gradeColors = { A: 'green', B: 'blue', C: 'yellow', D: 'red', F: 'red' };
+                        const gradeColor = gradeColors[health.grade] || 'white';
+                        console.log(`  ${chalk[gradeColor].bold(health.grade)} ${chalk.white.bold(health.overall_score + '/100')}  ${chalk.gray('Spec Health Score')}\n`);
+                        for (const [dim, data] of Object.entries(health.dimensions || {})) {
+                            const score = data.score || 0;
+                            const bar = '\u2588'.repeat(Math.round(score / 5)) + '\u2591'.repeat(20 - Math.round(score / 5));
+                            const color = score >= 70 ? 'green' : score >= 40 ? 'yellow' : 'red';
+                            console.log(`  ${chalk.gray(dim.padEnd(16))} ${chalk[color](bar)} ${score}`);
+                        }
+                        if (health.recommendations && health.recommendations.length > 0) {
+                            console.log(chalk.bold('\n  Recommendations:\n'));
+                            health.recommendations.slice(0, 5).forEach(r => {
+                                const text = typeof r === 'object' ? (r.recommendation || r.text || JSON.stringify(r)) : r;
+                                console.log(`  ${chalk.yellow('\u2192')} ${text}`);
+                            });
+                        }
+                    } catch {}
+                } else {
+                    console.log(`  ${chalk.yellow('\u2014')} No OpenAPI specs found in this directory`);
+                    console.log('');
+                    // Run demo on bundled example spec so users always see value
+                    const demoSpec = path.join(__dirname, '..', 'examples', 'petstore-v1.yaml');
+                    if (fs.existsSync(demoSpec)) {
+                        console.log(chalk.gray('  Running demo on a sample Pet Store API...\n'));
+                        try {
+                            const demoResult = execSync(
+                                `python3 -c "import sys,json; sys.path.insert(0,'${serverDir}'); from core.spec_health import score_spec; import yaml; spec=yaml.safe_load(open('${demoSpec}')); r=score_spec(spec); print(json.dumps(r))"`,
+                                { encoding: 'utf-8', timeout: 15000, cwd: serverDir }
+                            );
+                            const health = JSON.parse(demoResult);
+                            const gradeColors = { A: 'green', B: 'blue', C: 'yellow', D: 'red', F: 'red' };
+                            const gradeColor = gradeColors[health.grade] || 'white';
+                            console.log(`  ${chalk[gradeColor].bold(health.grade)} ${chalk.white.bold(health.overall_score + '/100')}  ${chalk.gray('Sample: Pet Store API')}\n`);
+                            for (const [dim, data] of Object.entries(health.dimensions || {})) {
+                                const score = data.score || 0;
+                                const bar = '\u2588'.repeat(Math.round(score / 5)) + '\u2591'.repeat(20 - Math.round(score / 5));
+                                const color = score >= 70 ? 'green' : score >= 40 ? 'yellow' : 'red';
+                                console.log(`  ${chalk.gray(dim.padEnd(16))} ${chalk[color](bar)} ${score}`);
+                            }
+                            console.log('');
+                            console.log(chalk.gray('  This is a demo. Point at your spec: npx delimit-cli scan openapi.yaml'));
+                            console.log('');
+                        } catch {}
+                    } else {
+                        console.log(chalk.gray('  Tip: point at a spec file: npx delimit-cli scan openapi.yaml'));
+                    }
+                }
+                // Interactive next step picker
+                try {
+                    const { next } = await inquirer.prompt([{
+                        type: 'list',
+                        name: 'next',
+                        message: '\n  What next?\n',
+                        choices: [
+                            { name: 'Set up governance for this project', value: 'init' },
+                            { name: 'Configure AI assistants (Claude, Codex, Gemini)', value: 'setup' },
+                            { name: 'Run a breaking change demo', value: 'try' },
+                            { name: 'Exit', value: 'exit' },
+                        ],
+                    }]);
+                    if (next === 'init') {
+                        execSync('npx delimit-cli init', { stdio: 'inherit' });
+                    } else if (next === 'setup') {
+                        execSync('npx delimit-cli setup', { stdio: 'inherit' });
+                    } else if (next === 'try') {
+                        execSync('npx delimit-cli try', { stdio: 'inherit' });
+                    }
+                } catch {}
+            } catch (e) {
+                console.log(chalk.red(`  Error: ${e.message}`));
+            }
+        }
     });
 
 // Try command — zero-risk demo with Markdown report artifact (LED-264)
@@ -2647,7 +2842,7 @@ program
                 if (!zeroResult.success) {
                     console.error(chalk.red(`\n  ${zeroResult.error}\n`));
                     if (zeroResult.error_type === 'no_framework') {
-                        console.log('  Usage: delimit lint <old_spec> <new_spec>');
+                        console.log('  Usage: npx delimit-cli lint <old_spec> <new_spec>');
                         console.log('  Or run from a FastAPI project directory.\n');
                     }
                     process.exit(1);

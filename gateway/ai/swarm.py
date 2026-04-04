@@ -3,7 +3,7 @@
 Implements Agent Swarm Standard v1.2 (4-party consent achieved 2026-03-30).
 Each venture gets 5 agent roles bound to AI models with namespace isolation.
 
-Config: /home/jamsons/governance/AGENT_SWARM_STANDARD.yml
+Config: ~/.delimit/governance/AGENT_SWARM_STANDARD.yml
 """
 
 import json

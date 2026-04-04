@@ -79,7 +79,7 @@ npx delimit-cli init        # Sets up governance + drift baseline
 - **Cross-Model Audit** -- 3 lenses (security, correctness, governance) with deterministic synthesis
 - **4-model deliberation** -- Claude + Grok + Gemini + Codex debate until consensus
 - **Universal Swarm Triggers** -- "Think and Build", "Keep building", "Ask Delimit"
-- **176 MCP tools** -- governance, context, shipping, observability, orchestration, and swarm
+- **187 MCP tools** -- governance, context, shipping, observability, orchestration, and swarm
 
 ---
 

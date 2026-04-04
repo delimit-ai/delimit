@@ -367,6 +367,11 @@ class OpenAPIDiffEngine:
     
     def _compare_schema_deep(self, path: str, old_schema: Dict, new_schema: Dict, required_fields: Optional[Set[str]] = None):
         """Deep comparison of schemas including nested objects."""
+        # Guard against None schemas
+        if old_schema is None:
+            old_schema = {}
+        if new_schema is None:
+            new_schema = {}
 
         # Handle references
         if "$ref" in old_schema or "$ref" in new_schema:

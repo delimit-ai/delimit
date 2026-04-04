@@ -22,7 +22,7 @@ logger = logging.getLogger("delimit.ai.screen_record")
 
 # ── Constants ────────────────────────────────────────────────────────────
 
-CHROMIUM_PATH = "/root/.cache/puppeteer/chrome/linux-146.0.7680.153/chrome-linux64/chrome"
+CHROMIUM_PATH = os.environ.get("CHROMIUM_PATH", "chromium")
 CONTENT_BASE = Path.home() / ".delimit" / "content"
 VIDEOS_DIR = CONTENT_BASE / "videos"
 GIFS_DIR = CONTENT_BASE / "gifs"
