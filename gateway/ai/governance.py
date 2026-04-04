@@ -478,6 +478,25 @@ NEXT_STEPS = {
 }
 
 
+def _deep_get(d: Dict, key: str) -> Any:
+    """Get a value from a dict, supporting nested keys with dots."""
+    if "." in key:
+        parts = key.split(".", 1)
+        sub = d.get(parts[0])
+        if isinstance(sub, dict):
+            return _deep_get(sub, parts[1])
+        return None
+
+    # Check top-level and common nested locations
+    if key in d:
+        return d[key]
+    # Check inside 'data', 'result', 'overall_coverage'
+    for wrapper in ["data", "result", "overall_coverage", "summary"]:
+        if isinstance(d.get(wrapper), dict) and key in d[wrapper]:
+            return d[wrapper][key]
+    return None
+
+
 def govern(tool_name: str, result: Dict[str, Any], project_path: str = ".") -> Dict[str, Any]:
     """
     Run governance on a tool's result. This is the central loop.
@@ -677,22 +696,3 @@ def govern(tool_name: str, result: Dict[str, Any], project_path: str = ".") -> D
             governed_result["next_steps"] = []
 
     return governed_result
-
-
-def _deep_get(d: Dict, key: str) -> Any:
-    """Get a value from a dict, supporting nested keys with dots."""
-    if "." in key:
-        parts = key.split(".", 1)
-        sub = d.get(parts[0])
-        if isinstance(sub, dict):
-            return _deep_get(sub, parts[1])
-        return None
-
-    # Check top-level and common nested locations
-    if key in d:
-        return d[key]
-    # Check inside 'data', 'result', 'overall_coverage'
-    for wrapper in ["data", "result", "overall_coverage", "summary"]:
-        if isinstance(d.get(wrapper), dict) and key in d[wrapper]:
-            return d[wrapper][key]
-    return None
