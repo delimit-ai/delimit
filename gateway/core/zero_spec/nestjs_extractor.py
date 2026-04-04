@@ -92,6 +92,122 @@ extract().catch(e => {{
 '''
 
 
+def _has_swagger_package(root: Path) -> bool:
+    """Check if @nestjs/swagger is in package.json."""
+    pkg = root / "package.json"
+    if not pkg.exists():
+        return False
+    try:
+        data = json.loads(pkg.read_text())
+        all_deps = {}
+        all_deps.update(data.get("dependencies", {}))
+        all_deps.update(data.get("devDependencies", {}))
+        return "@nestjs/swagger" in all_deps
+    except Exception:
+        return False
+
+
+def _find_app_module(root: Path) -> Optional[str]:
+    """Find the AppModule file in a NestJS project."""
+    candidates = [
+        "src/app.module.ts",
+        "src/app.module.js",
+        "app/app.module.ts",
+        "app/app.module.js",
+    ]
+    for candidate in candidates:
+        if (root / candidate).exists():
+            return "./" + candidate.rsplit(".", 1)[0]  # Remove extension
+    return None
+
+
+def _parse_nest_cli(root: Path) -> Dict[str, Any]:
+    """Parse nest-cli.json for project configuration."""
+    cli_path = root / "nest-cli.json"
+    if not cli_path.exists():
+        return {}
+    try:
+        return json.loads(cli_path.read_text())
+    except Exception:
+        return {}
+
+
+def _get_package_name(root: Path) -> Optional[str]:
+    """Get package name from package.json."""
+    try:
+        data = json.loads((root / "package.json").read_text())
+        return data.get("name")
+    except Exception:
+        return None
+
+
+def _get_package_version(root: Path) -> Optional[str]:
+    """Get package version from package.json."""
+    try:
+        data = json.loads((root / "package.json").read_text())
+        return data.get("version")
+    except Exception:
+        return None
+
+
+def _build_command(root: Path, script_path: str, is_typescript: bool, node_bin: Optional[str] = None):
+    """Build the subprocess command to run the extraction script."""
+    if is_typescript:
+        # Try ts-node first, then tsx, then npx ts-node
+        for runner in ["ts-node", "tsx"]:
+            local = root / "node_modules" / ".bin" / runner
+            if local.exists():
+                return [str(local), script_path]
+
+        # Try npx
+        try:
+            result = subprocess.run(
+                ["npx", "--yes", "ts-node", "--version"],
+                capture_output=True, timeout=10, cwd=str(root),
+            )
+            if result.returncode == 0:
+                return ["npx", "--yes", "ts-node", script_path]
+        except Exception:
+            pass
+
+        try:
+            result = subprocess.run(
+                ["npx", "--yes", "tsx", "--version"],
+                capture_output=True, timeout=10, cwd=str(root),
+            )
+            if result.returncode == 0:
+                return ["npx", "--yes", "tsx", script_path]
+        except Exception:
+            pass
+
+        return None
+    else:
+        node = node_bin or "node"
+        return [node, script_path]
+
+
+def _write_temp_spec(spec: Dict[str, Any], root: Path) -> str:
+    """Write extracted spec to a temp YAML file."""
+    import hashlib
+
+    try:
+        import yaml
+        formatter = yaml.dump
+        ext = ".yaml"
+    except ImportError:
+        formatter = lambda d: json.dumps(d, indent=2)
+        ext = ".json"
+
+    hash_input = str(root).encode()
+    short_hash = hashlib.sha256(hash_input).hexdigest()[:8]
+    spec_path = os.path.join(tempfile.gettempdir(), f"delimit-inferred-nestjs-{short_hash}{ext}")
+
+    with open(spec_path, "w") as f:
+        f.write(formatter(spec))
+
+    return spec_path
+
+
 def extract_nestjs_spec(
     info: FrameworkInfo,
     project_dir: str = ".",
@@ -251,119 +367,3 @@ def extract_nestjs_spec(
             os.unlink(script_path)
         except OSError:
             pass
-
-
-def _has_swagger_package(root: Path) -> bool:
-    """Check if @nestjs/swagger is in package.json."""
-    pkg = root / "package.json"
-    if not pkg.exists():
-        return False
-    try:
-        data = json.loads(pkg.read_text())
-        all_deps = {}
-        all_deps.update(data.get("dependencies", {}))
-        all_deps.update(data.get("devDependencies", {}))
-        return "@nestjs/swagger" in all_deps
-    except Exception:
-        return False
-
-
-def _find_app_module(root: Path) -> Optional[str]:
-    """Find the AppModule file in a NestJS project."""
-    candidates = [
-        "src/app.module.ts",
-        "src/app.module.js",
-        "app/app.module.ts",
-        "app/app.module.js",
-    ]
-    for candidate in candidates:
-        if (root / candidate).exists():
-            return "./" + candidate.rsplit(".", 1)[0]  # Remove extension
-    return None
-
-
-def _parse_nest_cli(root: Path) -> Dict[str, Any]:
-    """Parse nest-cli.json for project configuration."""
-    cli_path = root / "nest-cli.json"
-    if not cli_path.exists():
-        return {}
-    try:
-        return json.loads(cli_path.read_text())
-    except Exception:
-        return {}
-
-
-def _get_package_name(root: Path) -> Optional[str]:
-    """Get package name from package.json."""
-    try:
-        data = json.loads((root / "package.json").read_text())
-        return data.get("name")
-    except Exception:
-        return None
-
-
-def _get_package_version(root: Path) -> Optional[str]:
-    """Get package version from package.json."""
-    try:
-        data = json.loads((root / "package.json").read_text())
-        return data.get("version")
-    except Exception:
-        return None
-
-
-def _build_command(root: Path, script_path: str, is_typescript: bool, node_bin: Optional[str] = None):
-    """Build the subprocess command to run the extraction script."""
-    if is_typescript:
-        # Try ts-node first, then tsx, then npx ts-node
-        for runner in ["ts-node", "tsx"]:
-            local = root / "node_modules" / ".bin" / runner
-            if local.exists():
-                return [str(local), script_path]
-
-        # Try npx
-        try:
-            result = subprocess.run(
-                ["npx", "--yes", "ts-node", "--version"],
-                capture_output=True, timeout=10, cwd=str(root),
-            )
-            if result.returncode == 0:
-                return ["npx", "--yes", "ts-node", script_path]
-        except Exception:
-            pass
-
-        try:
-            result = subprocess.run(
-                ["npx", "--yes", "tsx", "--version"],
-                capture_output=True, timeout=10, cwd=str(root),
-            )
-            if result.returncode == 0:
-                return ["npx", "--yes", "tsx", script_path]
-        except Exception:
-            pass
-
-        return None
-    else:
-        node = node_bin or "node"
-        return [node, script_path]
-
-
-def _write_temp_spec(spec: Dict[str, Any], root: Path) -> str:
-    """Write extracted spec to a temp YAML file."""
-    import hashlib
-
-    try:
-        import yaml
-        formatter = yaml.dump
-        ext = ".yaml"
-    except ImportError:
-        formatter = lambda d: json.dumps(d, indent=2)
-        ext = ".json"
-
-    hash_input = str(root).encode()
-    short_hash = hashlib.sha256(hash_input).hexdigest()[:8]
-    spec_path = os.path.join(tempfile.gettempdir(), f"delimit-inferred-nestjs-{short_hash}{ext}")
-
-    with open(spec_path, "w") as f:
-        f.write(formatter(spec))
-
-    return spec_path
