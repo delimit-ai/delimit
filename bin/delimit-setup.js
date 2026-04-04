@@ -767,23 +767,44 @@ exit 127
                 fs.chmodSync(shimPath, '755');
             }
 
-            // Add to PATH in shell rc files
+            // Add to PATH in shell rc files (create if missing)
             const pathLine = `export PATH="${shimsDir}:$PATH"  # Delimit governance wrapping`;
-            for (const rc of ['.bashrc', '.zshrc']) {
+            let pathWritten = false;
+            for (const rc of ['.bashrc', '.zshrc', '.profile']) {
                 const rcPath = path.join(os.homedir(), rc);
-                if (fs.existsSync(rcPath)) {
-                    const content = fs.readFileSync(rcPath, 'utf-8');
-                    if (!content.includes('.delimit/shims')) {
-                        fs.appendFileSync(rcPath, `\n# Delimit governance wrapping\n${pathLine}\n`);
+                try {
+                    if (fs.existsSync(rcPath)) {
+                        const content = fs.readFileSync(rcPath, 'utf-8');
+                        if (!content.includes('.delimit/shims')) {
+                            fs.appendFileSync(rcPath, `\n# Delimit governance wrapping\n${pathLine}\n`);
+                        }
+                        pathWritten = true;
                     }
-                }
+                } catch { /* skip unreadable files */ }
             }
+            // If no rc files exist, create .bashrc with the PATH export
+            if (!pathWritten) {
+                const bashrc = path.join(os.homedir(), '.bashrc');
+                fs.writeFileSync(bashrc, `# Delimit governance wrapping\n${pathLine}\n`);
+                pathWritten = true;
+            }
+            // Also write to /etc/profile.d/ if writable (login shells)
+            try {
+                const profileD = '/etc/profile.d/delimit-shims.sh';
+                if (!fs.existsSync(profileD)) {
+                    fs.writeFileSync(profileD, `# Delimit governance wrapping\n${pathLine}\n`);
+                }
+            } catch { /* not writable, skip */ }
 
             if (shimsInstalled) {
                 await logp(`  ${green('✓')} Governance shims updated`);
             } else {
                 log(`  ${green('✓')} Governance wrapping enabled`);
-                log(`  ${dim('  Restart your terminal or run: source ~/.bashrc')}`);
+                log('');
+                log(`  ${bold('To activate now, run:')}`);
+                log(`  ${green('source ~/.bashrc')}`);
+                log('');
+                log(`  ${dim('Or restart your terminal. The banner appears before each AI session.')}`);
             }
         } else {
             log(`  ${dim('  Skipped. Enable later: delimit shims enable')}`);

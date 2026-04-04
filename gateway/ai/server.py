@@ -60,13 +60,13 @@ from fastmcp import FastMCP
 logger = logging.getLogger("delimit.ai")
 
 # ═══════════════════════════════════════════════════════════════════════
-#  STR-046: Agent Identity — session tracking for every tool call
+#  STR-046: Agent Identity - session tracking for every tool call
 # ═══════════════════════════════════════════════════════════════════════
 
 _current_session_id = os.environ.get("DELIMIT_SESSION_ID", "")
 
 # ═══════════════════════════════════════════════════════════════════════
-#  STR-053: Distributed Tracing — trace ID + span counter for every call
+#  STR-053: Distributed Tracing - trace ID + span counter for every call
 # ═══════════════════════════════════════════════════════════════════════
 
 _trace_id = os.environ.get("DELIMIT_TRACE_ID", str(uuid.uuid4())[:8])
@@ -257,11 +257,11 @@ def _coerce_dict_arg(
 HIGH_RISK_TOOLS = {
     'deploy_publish', 'deploy_rollback', 'deploy_npm', 'deploy_site',
     'security_scan', 'data_migrate', 'data_backup',
-    # Social/outreach — drafts are fine, but posting/approving requires gate
+    # Social/outreach - drafts are fine, but posting/approving requires gate
     'social_approve', 'content_publish',
-    # Agent dispatch — spawns autonomous work, must be gated
+    # Agent dispatch - spawns autonomous work, must be gated
     'agent_dispatch', 'daemon_run',
-    # Deliberation — burns model quota
+    # Deliberation - burns model quota
     'deliberate',
 }
 
@@ -269,7 +269,7 @@ CRITICAL_RISK_TOOLS = {
     'deploy_rollback', 'data_migrate',
 }
 
-# Rate limits per tool per hour — prevents runaway loops
+# Rate limits per tool per hour - prevents runaway loops
 _TOOL_RATE_LIMITS = {
     'social_post': 10,
     'social_target': 20,
@@ -320,7 +320,7 @@ def _classify_risk(tool_name: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  STR-052: Policy Kernel — Inline Enforcement
+#  STR-052: Policy Kernel - Inline Enforcement
 #  Checks policy BEFORE/AFTER tool execution to block high-risk actions.
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -372,7 +372,7 @@ def _check_policy_gate(tool_name: str, kwargs: dict) -> Optional[Dict]:
                 "action": "Switch to guarded mode or request approval",
             }
 
-    # LED-173: Deploy gating — block deploys when unresolved critical findings exist
+    # LED-173: Deploy gating - block deploys when unresolved critical findings exist
     DEPLOY_TOOLS = {"deploy_publish", "deploy_npm", "deploy_site", "deploy_build"}
     clean = tool_name.replace("delimit_", "")
     if clean in DEPLOY_TOOLS and mode != "advisory":
@@ -493,7 +493,7 @@ def _emit_policy_event(tool_name: str, status: str, reason: str) -> None:
 
 mcp = FastMCP("delimit")
 mcp.description = (
-    "Delimit — One workspace for every AI coding assistant. "
+    "Delimit - One workspace for every AI coding assistant. "
     "On session start, call delimit_ledger_context to check for open tasks. "
     "Use delimit_scan on new projects. Track all work via the ledger."
 )
@@ -542,12 +542,12 @@ def _experimental_tool():
     return _tier_tool("experimental")
 
 
-# Pro tools — single source of truth is license_core.py
+# Pro tools - single source of truth is license_core.py
 # Import at module level; fallback to license.py shim if core unavailable
 from ai.license import PRO_TOOLS
 from ai.rate_limiter import limiter, create_cost_controls_response
 
-# Free tools — everything NOT in PRO_TOOLS
+# Free tools - everything NOT in PRO_TOOLS
 # security_audit, security_scan, test_generate, test_smoke, activate, license_status
 
 
@@ -644,7 +644,7 @@ def _count_critical_findings(audit_result: Dict[str, Any]) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  CONSENSUS 096: Tool Cohesion — next_steps in every response
+#  CONSENSUS 096: Tool Cohesion - next_steps in every response
 # ═══════════════════════════════════════════════════════════════════════
 
 NEXT_STEPS_REGISTRY: Dict[str, List[Dict[str, Any]]] = {
@@ -885,6 +885,9 @@ NEXT_STEPS_REGISTRY: Dict[str, List[Dict[str, Any]]] = {
     ],
     # --- Sensing ---
     "sensor_github_issue": [],
+    "sensor_github_migrations": [
+        {"tool": "delimit_ledger_add", "reason": "Add high-value migration signals to the strategy ledger", "suggested_args": {}, "is_premium": False},
+    ],
     # --- Context Filesystem (STR-048) ---
     "context_init": [
         {"tool": "delimit_context_write", "reason": "Write an artifact to the new context", "suggested_args": {}, "is_premium": False},
@@ -1205,13 +1208,13 @@ def _detect_environment() -> Dict[str, Any]:
 _inbox_daemon_autostarted = False
 _toolcard_cache_autoregistered = False
 
-# MCP response size cap — prevents Node.js heap OOM on all clients (Gemini CLI, Cursor, etc.)
+# MCP response size cap - prevents Node.js heap OOM on all clients (Gemini CLI, Cursor, etc.)
 # FastMCP serializes responses to JSON over stdio; large payloads crash Node's default 1.5GB heap.
 # Cap is set high enough that all normal tool responses (deliberation, audit, ledger) pass through
 # untouched. Only pathological cases (e.g. 910-item scan dumps) get trimmed.
 _MCP_RESPONSE_SIZE_LIMIT = 200_000  # 200KB hard ceiling
 
-# Fields within list items that are safe to truncate — display text, not structured data
+# Fields within list items that are safe to truncate - display text, not structured data
 _ITEM_TEXT_FIELDS = {"content_snippet", "body", "text", "rationale", "full_text", "description", "summary"}
 _ITEM_TEXT_MAX = 300  # chars per field within a list item
 
@@ -1221,14 +1224,14 @@ def _cap_response(result: Dict[str, Any]) -> Dict[str, Any]:
     Strategy (least destructive first):
     1. Trim known text-only fields within list items (content_snippet, body, etc.)
     2. If still over limit, truncate lists to first 20 items
-    3. If still over limit, add a note — structural data is never silently dropped
+    3. If still over limit, add a note - structural data is never silently dropped
     """
     import json as _json, copy as _copy
     if len(_json.dumps(result)) <= _MCP_RESPONSE_SIZE_LIMIT:
         return result
     r = _copy.deepcopy(result)
 
-    # Pass 1: trim display-text fields inside list items (safe — these are human-readable snippets)
+    # Pass 1: trim display-text fields inside list items (safe - these are human-readable snippets)
     for k, v in r.items():
         if isinstance(v, list):
             for item in v:
@@ -1248,7 +1251,7 @@ def _cap_response(result: Dict[str, Any]) -> Dict[str, Any]:
     if len(_json.dumps(r)) <= _MCP_RESPONSE_SIZE_LIMIT:
         return r
 
-    # Pass 3: last resort — note that response is large but return it anyway
+    # Pass 3: last resort - note that response is large but return it anyway
     # Better to let the client decide than silently drop structured data
     r["_size_warning"] = f"Response exceeds {_MCP_RESPONSE_SIZE_LIMIT // 1000}KB. Use limit= or action='list' to reduce payload."
     return r
@@ -1267,7 +1270,7 @@ def _with_next_steps(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
     6. Auto-create ledger items for failures/warnings
     7. Route back to delimit_ledger_context (the loop continues)
     """
-    # Auto-start inbox daemon on first tool call — works for ALL models
+    # Auto-start inbox daemon on first tool call - works for ALL models
     global _inbox_daemon_autostarted
     if not _inbox_daemon_autostarted:
         _inbox_daemon_autostarted = True
@@ -1303,7 +1306,7 @@ def _with_next_steps(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         pass
 
-    # Voice doctrine check — flag hype words in outgoing text
+    # Voice doctrine check - flag hype words in outgoing text
     if isinstance(result, dict):
         _text_fields = [result.get("text", ""), result.get("message", ""),
                         result.get("explanation", ""), result.get("changelog", ""),
@@ -1316,7 +1319,7 @@ def _with_next_steps(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
                 f"Rewrite with concrete mechanisms, not vague benefits."
             )
 
-    # Rate limit check — prevents runaway loops from any model
+    # Rate limit check - prevents runaway loops from any model
     rate_gate = _check_rate_limit(tool_name)
     if rate_gate:
         _emit_event(tool_name, rate_gate)
@@ -1338,7 +1341,7 @@ def _with_next_steps(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
         if injection:
             result["_security_warning"] = injection
 
-    # Pro license gate — blocks execution for premium tools
+    # Pro license gate - blocks execution for premium tools
     full_name = f"delimit_{tool_name}" if not tool_name.startswith("delimit_") else tool_name
     gate = _check_pro(full_name)
     if gate:
@@ -1356,25 +1359,41 @@ def _with_next_steps(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  TIER 1: CORE — API Lint Engine
+#  TIER 1: CORE - API Lint Engine
 # ═══════════════════════════════════════════════════════════════════════
 
 
 @mcp.tool()
-def delimit_lint(old_spec: str, new_spec: str, policy_file: Optional[str] = None) -> Dict[str, Any]:
+def delimit_lint(old_spec: str, new_spec: str, policy_file: Optional[str] = None, dry_run: bool = False) -> Dict[str, Any]:
     """Lint two OpenAPI specs for breaking changes and policy violations.
     Primary CI integration point. Combines diff + policy into pass/fail.
     Auto-chains: semver classification, governance evaluation on breaking changes.
+
+    When dry_run=True, returns violations and semver classification without
+    recording evidence, triggering notifications, or enforcing governance.
+    Useful for CI preview comments ("what would block") without side effects.
 
     Args:
         old_spec: Path to the old (baseline) OpenAPI spec file.
         new_spec: Path to the new (proposed) OpenAPI spec file.
         policy_file: Optional path to a .delimit/policies.yml file.
+        dry_run: If True, return violations without side effects (no evidence, no chains).
     """
     from backends.gateway_core import run_lint, run_semver
 
     # Step 1: Core lint
     lint_result = _safe_call(run_lint, old_spec=old_spec, new_spec=new_spec, policy_file=policy_file)
+
+    # Dry-run mode: return raw lint + semver, skip all chains and governance
+    if dry_run:
+        lint_result["dry_run"] = True
+        lint_result["simulated"] = True
+        # Still classify semver (informational, no side effects)
+        semver_result = _safe_call(run_semver, old_spec=old_spec, new_spec=new_spec)
+        if not semver_result.get("error"):
+            lint_result["semver"] = semver_result
+        return lint_result
+
     chain: Dict[str, Any] = {"id": "lint_chain", "steps": []}
 
     if lint_result.get("error"):
@@ -1475,13 +1494,93 @@ def delimit_diff(old_spec: str, new_spec: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def delimit_policy(spec_files: List[str], policy_file: Optional[str] = None) -> Dict[str, Any]:
-    """Inspect or validate governance policy configuration.
+def delimit_diff_report(
+    old_spec: str,
+    new_spec: str,
+    output_format: str = "html",
+    output_file: Optional[str] = None,
+    policy_file: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Generate a shareable API diff report with full analysis.
+
+    Runs the complete pipeline (diff, policy evaluation, semver
+    classification, spec health scoring, migration guide) and produces
+    a self-contained HTML report or structured JSON. The HTML has inline
+    CSS with no external dependencies -- open it in any browser.
+
+    Use this when teams need a shareable artifact for API review, PR
+    comments, or compliance records.
+
+    Args:
+        old_spec: Path to the old (baseline) OpenAPI spec file.
+        new_spec: Path to the new (proposed) OpenAPI spec file.
+        output_format: "html" for a standalone HTML report, "json" for structured data.
+        output_file: Optional file path to write the report to disk.
+        policy_file: Optional path to a .delimit/policies.yml file.
+    """
+    from backends.gateway_core import run_diff_report
+    return _with_next_steps(
+        "diff_report",
+        _safe_call(
+            run_diff_report,
+            old_spec=old_spec,
+            new_spec=new_spec,
+            fmt=output_format,
+            output_file=output_file,
+            policy_file=policy_file,
+        ),
+    )
+
+
+@mcp.tool()
+def delimit_spec_health(spec: str) -> Dict[str, Any]:
+    """Score an OpenAPI spec on quality dimensions. Instant health grade.
+
+    Evaluates completeness, security, consistency, documentation, and best
+    practices. Returns an overall score (0-100), letter grade (A-F),
+    per-dimension breakdowns, and specific recommendations for improvement.
+
+    Use this for quick spec quality checks during onboarding or code review.
+    Works on any valid OpenAPI 3.x or Swagger 2.0 spec.
+
+    Args:
+        spec: Path to an OpenAPI spec file (YAML or JSON).
+    """
+    from backends.gateway_core import run_spec_health
+    return _with_next_steps("spec_health", _safe_call(run_spec_health, spec_path=spec))
+
+
+@mcp.tool()
+def delimit_policy(
+    spec_files: List[str],
+    policy_file: Optional[str] = None,
+    action: str = "inspect",
+    old_spec: Optional[str] = None,
+    new_spec: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Inspect, validate, or simulate governance policy configuration.
+
+    Actions:
+      - "inspect" (default): Show loaded rules and template.
+      - "simulate": Dry-run lint+policy across all presets (strict, default,
+        relaxed) plus optional custom policy. Shows what WOULD pass/fail
+        without enforcing anything. Requires old_spec and new_spec.
 
     Args:
         spec_files: List of spec file paths.
         policy_file: Optional custom policy file path.
+        action: "inspect" or "simulate".
+        old_spec: Path to baseline spec (required for simulate).
+        new_spec: Path to proposed spec (required for simulate).
     """
+    if action == "simulate":
+        if not old_spec or not new_spec:
+            return {"error": "missing_specs", "message": "simulate action requires old_spec and new_spec parameters."}
+        from backends.gateway_core import simulate_policy
+        result = _safe_call(simulate_policy, old_spec=old_spec, new_spec=new_spec, policy_file=policy_file)
+        # Simulation results bypass governance chains -- nothing is enforced
+        return result
+
     from backends.gateway_core import run_policy
     return _with_next_steps("policy", _safe_call(run_policy, spec_files=spec_files, policy_file=policy_file))
 
@@ -1583,7 +1682,7 @@ def delimit_init(
 
     Args:
         project_path: Project root directory.
-        preset: Policy preset — strict, default, or relaxed.
+        preset: Policy preset - strict, default, or relaxed.
     """
     VALID_PRESETS = ("strict", "default", "relaxed")
     if preset not in VALID_PRESETS:
@@ -1673,7 +1772,7 @@ def delimit_init(
     })
 
 # ═══════════════════════════════════════════════════════════════════════
-#  TIER 2: PLATFORM — OS, Governance, Memory, Vault
+#  TIER 2: PLATFORM - OS, Governance, Memory, Vault
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -1969,7 +2068,7 @@ def delimit_vault_snapshot() -> Dict[str, Any]:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  TIER 3: EXTENDED — Deploy, Intel, Generate, Repo, Security, Evidence
+#  TIER 3: EXTENDED - Deploy, Intel, Generate, Repo, Security, Evidence
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -2413,7 +2512,7 @@ def delimit_security_ingest(
     or CodeQL. Normalizes findings into a canonical schema, tracks in the
     ledger, and enables deploy gating on unresolved criticals.
 
-    This is the orchestrator model — Delimit doesn't run the scanner,
+    This is the orchestrator model - Delimit doesn't run the scanner,
     it adds intelligence on top of results you already have.
 
     Args:
@@ -2436,7 +2535,7 @@ def delimit_security_ingest(
             "error": f"Unsupported tool '{tool}'. Supported: {', '.join(SUPPORTED_TOOLS)}",
         })
 
-    # Parse results — accept JSON string or file path
+    # Parse results - accept JSON string or file path
     raw_data = None
     if results.strip().startswith(("{", "[")):
         try:
@@ -2657,7 +2756,7 @@ def delimit_security_deliberate(
     Args:
         findings: JSON string of findings to triage, or empty to pull from ledger.
         repo: Repository context for the triage.
-        focus: Which findings to triage — "critical", "high", "all". Default: critical.
+        focus: Which findings to triage - "critical", "high", "all". Default: critical.
     """
     from ai.license import require_premium
     gate = require_premium("security_deliberate")
@@ -2675,7 +2774,7 @@ def delimit_security_deliberate(
         except json.JSONDecodeError:
             return _with_next_steps("security_deliberate", {"error": "Invalid JSON in findings"})
     else:
-        # Pull from ledger — find open security items
+        # Pull from ledger - find open security items
         try:
             from ai.ledger_manager import list_items
             ledger_data = list_items(status="open")
@@ -2769,7 +2868,7 @@ def delimit_security_deliberate(
 def delimit_siem(action: str = "status", integration: str = "",
                   settings: str = "", enabled: str = "",
                   event: str = "") -> Dict[str, Any]:
-    """Manage SIEM streaming — forward audit events to Splunk, Datadog, EventBridge, or webhooks.
+    """Manage SIEM streaming - forward audit events to Splunk, Datadog, EventBridge, or webhooks.
 
     Actions:
       status: Show all SIEM integrations and delivery stats
@@ -2915,7 +3014,7 @@ def delimit_evidence_verify(bundle_id: Optional[str] = None, bundle_path: Option
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  TIER 4: OPS / UI — Governance Primitives + UI Tooling
+#  TIER 4: OPS / UI - Governance Primitives + UI Tooling
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -3455,7 +3554,7 @@ def delimit_story_accessibility(project_path: str, standards: str = "WCAG2AA") -
     return _with_next_steps("story_accessibility", _safe_call(story_accessibility_test, project_path=project_path, standards=standards))
 
 
-# ─── TestSmith (Testing — Real implementations) ──────────────────────
+# ─── TestSmith (Testing - Real implementations) ──────────────────────
 
 @mcp.tool()
 def delimit_test_generate(project_path: str, source_files: Optional[List[str]] = None, framework: str = "jest") -> Dict[str, Any]:
@@ -3667,6 +3766,61 @@ async def delimit_sensor_github_issue(
         return _with_next_steps("sensor_github_issue", {"error": str(e), "has_new_activity": False})
 
 
+# --- STR-062: Migration Pattern Detector ---
+
+@mcp.tool()
+def delimit_sensor_github_migrations(
+    repos: List[str],
+    limit: int = 20,
+) -> Dict[str, Any]:
+    """Scan GitHub issues/PRs for migration patterns across target repos.
+
+    Detects language like "migrated from X to Y", "switched to Y",
+    "replaced X with Y", "no longer using X" etc. Returns structured
+    migration signals with source/target tools, sentiment, and strength.
+
+    Useful for competitive intelligence: see what tools repos are moving
+    away from and what they are adopting.
+
+    Args:
+        repos: List of GitHub repos in owner/repo format (e.g. ["chatwoot/chatwoot", "cal-com/cal.com"]).
+        limit: Max migration signals per repo. Default 20.
+    """
+    try:
+        from ai.social_target import scan_github_migrations
+        signals = scan_github_migrations(repos=repos, limit=limit)
+
+        # Separate errors from valid signals
+        errors = [s for s in signals if s.get("error")]
+        valid = [s for s in signals if not s.get("error")]
+
+        # Summary stats
+        from_tools: Dict[str, int] = {}
+        to_tools: Dict[str, int] = {}
+        for s in valid:
+            ft = s.get("from_tool", "")
+            tt = s.get("to_tool", "")
+            if ft:
+                from_tools[ft] = from_tools.get(ft, 0) + 1
+            if tt:
+                to_tools[tt] = to_tools.get(tt, 0) + 1
+
+        return _with_next_steps("sensor_github_migrations", {
+            "total_signals": len(valid),
+            "errors": errors,
+            "signals": valid,
+            "summary": {
+                "migrating_from": from_tools,
+                "migrating_to": to_tools,
+                "repos_scanned": len(repos),
+                "repos_with_signals": len(set(s.get("repo") for s in valid)),
+            },
+        })
+    except Exception as e:
+        logger.error("Migration sensor error: %s\n%s", e, traceback.format_exc())
+        return _with_next_steps("sensor_github_migrations", {"error": str(e), "total_signals": 0})
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  META
 # ═══════════════════════════════════════════════════════════════════════
@@ -3677,7 +3831,7 @@ def _count_registered_tools() -> int:
     try:
         return len(mcp._tool_manager._tools)
     except AttributeError:
-        # FastMCP version without _tool_manager — count via module introspection
+        # FastMCP version without _tool_manager - count via module introspection
         import ai.server as _self
         return len([n for n in dir(_self) if n.startswith("delimit_")])
 
@@ -3709,14 +3863,15 @@ def delimit_version() -> Dict[str, Any]:
 TOOL_HELP = {
     "init": {"desc": "Initialize governance for a project", "example": "delimit_init(project_path='.', preset='default')", "params": "project_path (str), preset (strict|default|relaxed)"},
     "lint": {"desc": "Diff two OpenAPI specs and check policy violations", "example": "delimit_lint(old_spec='base.yaml', new_spec='new.yaml')", "params": "old_spec (path), new_spec (path), policy_file (optional path)"},
-    "diff": {"desc": "Pure diff between two specs — no policy, just changes", "example": "delimit_diff(old_spec='base.yaml', new_spec='new.yaml')", "params": "old_spec (path), new_spec (path)"},
+    "diff": {"desc": "Pure diff between two specs - no policy, just changes", "example": "delimit_diff(old_spec='base.yaml', new_spec='new.yaml')", "params": "old_spec (path), new_spec (path)"},
     "semver": {"desc": "Classify the semver bump for a spec change", "example": "delimit_semver(old_spec='base.yaml', new_spec='new.yaml', current_version='1.2.3')", "params": "old_spec, new_spec, current_version (optional)"},
     "explain": {"desc": "Human-readable explanation of API changes", "example": "delimit_explain(old_spec='base.yaml', new_spec='new.yaml', template='pr_comment')", "params": "old_spec, new_spec, template (developer|pr_comment|migration|changelog)"},
-    "gov_health": {"desc": "Check governance status — is the project initialized?", "example": "delimit_gov_health(repo='.')", "params": "repo (path, default '.')"},
+    "gov_health": {"desc": "Check governance status - is the project initialized?", "example": "delimit_gov_health(repo='.')", "params": "repo (path, default '.')"},
     "test_coverage": {"desc": "Measure test coverage for a project", "example": "delimit_test_coverage(project_path='.', threshold=80)", "params": "project_path, threshold (default 80)"},
-    "repo_analyze": {"desc": "Full repo health report — code quality, security, dependencies", "example": "delimit_repo_analyze(target='.')", "params": "target (path)"},
+    "repo_analyze": {"desc": "Full repo health report - code quality, security, dependencies", "example": "delimit_repo_analyze(target='.')", "params": "target (path)"},
     "zero_spec": {"desc": "Extract OpenAPI spec from source code (FastAPI, Express, NestJS)", "example": "delimit_zero_spec(project_dir='.')", "params": "project_dir (path)"},
     "sensor_github_issue": {"desc": "Monitor a GitHub issue for new comments", "example": "delimit_sensor_github_issue(repo='owner/repo', issue_number=123)", "params": "repo (owner/name), issue_number (int)"},
+    "sensor_github_migrations": {"desc": "Scan repos for migration patterns (migrated from X to Y)", "example": "delimit_sensor_github_migrations(repos=['chatwoot/chatwoot'])", "params": "repos (list of owner/repo), limit (int, default 20)"},
     "quickstart": {"desc": "60-second guided first-run experience", "example": "delimit_quickstart(project_path='.')", "params": "project_path (str, default '.')"},
 }
 
@@ -3736,7 +3891,7 @@ STANDARD_WORKFLOWS = [
     },
     {
         "name": "Remember Across Models",
-        "pain": "Every new session starts from zero — your agent forgot everything",
+        "pain": "Every new session starts from zero - your agent forgot everything",
         "fix": "Store and recall context across any AI assistant",
         "steps": ["delimit_memory_store", "delimit_memory_search", "delimit_session_handoff"],
     },
@@ -3760,7 +3915,7 @@ def delimit_swarm(action: str = "status", venture: str = "",
                    agent_id: str = "", repo_path: str = "",
                    deploy_target: str = "", target_path: str = "",
                    access_action: str = "read") -> Dict[str, Any]:
-    """Manage the agent swarm — ventures, personas, namespace isolation.
+    """Manage the agent swarm - ventures, personas, namespace isolation.
 
     Each venture gets 5 AI agent roles (Architect, Senior Dev, Reviewer, QA, Ops)
     with namespace isolation and model binding per Agent Swarm Standard v1.2.
@@ -3788,7 +3943,7 @@ def delimit_swarm(action: str = "status", venture: str = "",
         repo_path: Repo path, description, or reason depending on action.
         deploy_target: Deploy target for venture registration.
         target_path: File path, tool name, or role name depending on action.
-        access_action: Action name — for check: "read"/"write"/"deploy". For approve: "deploy_production"/"deploy_staging"/"social_post" etc.
+        access_action: Action name - for check: "read"/"write"/"deploy". For approve: "deploy_production"/"deploy_staging"/"social_post" etc.
     """
     from ai.swarm import (register_venture, get_venture, get_agent,
                            check_namespace_access, get_swarm_status,
@@ -3978,7 +4133,7 @@ def delimit_redact(action: str = "scan", text: str = "",
 
     if action == "redact":
         result = pii_redact(text, categories=cat_list)
-        # Never expose token_map through MCP — keep it local
+        # Never expose token_map through MCP - keep it local
         return _with_next_steps("redact", {
             "redacted": result["redacted"],
             "findings": result["findings"],
@@ -3992,7 +4147,7 @@ def delimit_redact(action: str = "scan", text: str = "",
 def delimit_prompt_drift(action: str = "check", prompt: str = "",
                           model: str = "", result_summary: str = "",
                           success: str = "true", task_type: str = "") -> Dict[str, Any]:
-    """Detect prompt drift — when the same task behaves differently across models.
+    """Detect prompt drift - when the same task behaves differently across models.
 
     Track how prompts perform across Claude, Codex, and Gemini.
     Find which model is best for each task type on YOUR codebase.
@@ -4099,7 +4254,7 @@ def delimit_project_config(action: str = "load", project_path: str = ".",
 def delimit_playbook(action: str = "list", name: str = "", prompt: str = "",
                       description: str = "", variables: str = "",
                       model_hint: str = "", tags: str = "") -> Dict[str, Any]:
-    """Manage reusable prompt templates — save, run, list, delete.
+    """Manage reusable prompt templates - save, run, list, delete.
 
     Save your best prompts as named commands. Use {{variables}} for dynamic parts.
     Works across all AI assistants through the shared MCP workspace.
@@ -4151,7 +4306,7 @@ def delimit_playbook(action: str = "list", name: str = "", prompt: str = "",
 
 @mcp.tool()
 def delimit_help(tool_name: str = "") -> Dict[str, Any]:
-    """Get help for a Delimit tool — what it does, parameters, and examples.
+    """Get help for a Delimit tool - what it does, parameters, and examples.
 
     Args:
         tool_name: Tool name (e.g. 'lint', 'gov_health'). Leave empty for overview.
@@ -4164,7 +4319,7 @@ def delimit_help(tool_name: str = "") -> Dict[str, Any]:
                 {"name": w["name"], "pain": w["pain"], "start_with": w["steps"][0]}
                 for w in STANDARD_WORKFLOWS
             ],
-            "tip": "Tell me what you're trying to do — I'll suggest the right workflow.",
+            "tip": "Tell me what you're trying to do - I'll suggest the right workflow.",
             "total_tools": total,
         })
 
@@ -4178,22 +4333,81 @@ def delimit_help(tool_name: str = "") -> Dict[str, Any]:
 
 @mcp.tool()
 def delimit_diagnose(project_path: str = ".") -> Dict[str, Any]:
-    """Diagnose your Delimit setup — check environment, config, and tool status.
+    """Comprehensive health check of your Delimit installation (delimit doctor).
 
-    Universal 'get me unstuck' command. Checks Python, MCP config, governance state,
-    and reports any issues with suggested fixes.
+    Universal debugging tool. Runs 10 checks covering MCP connectivity,
+    dependencies, governance state, AI assistants, permissions, API keys,
+    network, version, daemons, and disk usage. Each item reports PASS, FAIL,
+    or SKIP with actionable fixes.
 
     Args:
         project_path: Project to diagnose.
     """
-    issues = []
-    checks = {}
-
-    # Python version
     import sys
-    checks["python"] = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    import urllib.request
+    import urllib.error
 
-    # Check .delimit/ dir
+    issues: List[Dict[str, str]] = []
+    checks: Dict[str, Any] = {}
+    checklist: List[Dict[str, str]] = []
+    home = Path.home()
+
+    def _record(name: str, status: str, detail: str = "", fix: str = ""):
+        """Record a checklist item. status is PASS, FAIL, or SKIP."""
+        entry = {"check": name, "status": status, "detail": detail}
+        checklist.append(entry)
+        if status == "FAIL" and fix:
+            issues.append({"issue": f"{name}: {detail}", "fix": fix})
+
+    # ── 1. MCP Server Connectivity ───────────────────────────────────────
+    try:
+        tool_count = _count_registered_tools()
+        if tool_count > 0:
+            _record("MCP Server", "PASS", f"Running, {tool_count} tools registered")
+            checks["mcp_server"] = {"reachable": True, "tools": tool_count}
+        else:
+            _record("MCP Server", "FAIL", "Server running but 0 tools registered",
+                     "Restart the MCP server -- possible import error")
+            checks["mcp_server"] = {"reachable": True, "tools": 0}
+    except Exception as exc:
+        _record("MCP Server", "FAIL", f"Cannot query tool registry: {exc}",
+                 "Restart the MCP server process")
+        checks["mcp_server"] = {"reachable": False, "error": str(exc)}
+
+    # ── 2. Python Dependencies ───────────────────────────────────────────
+    checks["python"] = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    dep_results = {}
+    required_deps = {
+        "yaml": "pyyaml",
+        "pydantic": "pydantic",
+        "packaging": "packaging",
+        "fastmcp": "fastmcp",
+    }
+    all_deps_ok = True
+    for import_name, pip_name in required_deps.items():
+        try:
+            mod = __import__(import_name)
+            ver = getattr(mod, "__version__", getattr(mod, "VERSION", "installed"))
+            dep_results[import_name] = str(ver)
+        except ImportError:
+            dep_results[import_name] = "MISSING"
+            all_deps_ok = False
+    if all_deps_ok:
+        _record("Python Dependencies", "PASS",
+                 f"Python {checks['python']}, all {len(required_deps)} packages present")
+    else:
+        missing = [k for k, v in dep_results.items() if v == "MISSING"]
+        _record("Python Dependencies", "FAIL",
+                 f"Missing: {', '.join(missing)}",
+                 f"pip install {' '.join(required_deps[m] for m in missing)}")
+        for m in missing:
+            issues.append({"issue": f"Missing Python package: {m}", "fix": f"pip install {required_deps[m]}"})
+    checks["dependencies"] = dep_results
+    # Backward compat keys
+    for import_name, pip_name in required_deps.items():
+        checks[f"dep_{import_name}" if import_name != "fastmcp" else "fastmcp"] = dep_results[import_name] != "MISSING"
+
+    # ── 3. Governance State ──────────────────────────────────────────────
     p = Path(project_path).resolve()
     delimit_dir = p / ".delimit"
     policies = delimit_dir / "policies.yml"
@@ -4204,37 +4418,38 @@ def delimit_diagnose(project_path: str = ".") -> Dict[str, Any]:
     checks["policies_file"] = policies.is_file()
     checks["ledger_file"] = ledger.is_file()
 
-    if not delimit_dir.is_dir():
+    if delimit_dir.is_dir() and policies.is_file() and ledger.is_file():
+        gov_parts = [".delimit/ exists", "policies.yml present", "ledger present"]
+        try:
+            entry_count = sum(1 for line in ledger.read_text().splitlines() if line.strip())
+            gov_parts.append(f"{entry_count} ledger entries")
+        except Exception:
+            pass
+        _record("Governance State", "PASS", "; ".join(gov_parts))
+    elif not delimit_dir.is_dir():
+        _record("Governance State", "FAIL", "Project not initialized",
+                 "Run delimit_init(project_path='.') or say 'initialize governance for this project'")
         issues.append({
             "issue": "Project not initialized",
             "fix": "Run delimit_init(project_path='.') or say 'initialize governance for this project'",
         })
-    elif not policies.is_file():
-        issues.append({
-            "issue": "Missing policies.yml",
-            "fix": "Run delimit_init(project_path='.', preset='default')",
-        })
+    else:
+        missing_parts = []
+        if not policies.is_file():
+            missing_parts.append("policies.yml")
+        if not ledger.is_file():
+            missing_parts.append("ledger")
+        _record("Governance State", "FAIL",
+                 f".delimit/ exists but missing: {', '.join(missing_parts)}",
+                 "Run delimit_init(project_path='.', preset='default')")
+        if not policies.is_file():
+            issues.append({
+                "issue": "Missing policies.yml",
+                "fix": "Run delimit_init(project_path='.', preset='default')",
+            })
 
-    # Check key dependencies
-    for pkg in ["yaml", "pydantic", "packaging"]:
-        try:
-            __import__(pkg)
-            checks[f"dep_{pkg}"] = True
-        except ImportError:
-            checks[f"dep_{pkg}"] = False
-            issues.append({"issue": f"Missing Python package: {pkg}", "fix": f"pip install {pkg}"})
-
-    # Check fastmcp
-    try:
-        import fastmcp
-        checks["fastmcp"] = True
-    except ImportError:
-        checks["fastmcp"] = False
-        issues.append({"issue": "FastMCP not installed", "fix": "pip install fastmcp"})
-
-    # LED-191: Config drift detection across AI assistants
+    # ── 4. AI Assistant Detection ────────────────────────────────────────
     config_sync = {}
-    home = Path.home()
     assistant_configs = {
         "claude_code": home / ".mcp.json",
         "codex_toml": home / ".codex" / "config.toml",
@@ -4264,7 +4479,215 @@ def delimit_diagnose(project_path: str = ".") -> Dict[str, Any]:
     checks["assistant_configs"] = config_sync
     checks["assistants_configured"] = f"{configured_count}/{installed_count}"
 
-    # LED-192: MCP server reputation check (basic — check for known risky patterns)
+    if installed_count == 0:
+        _record("AI Assistants", "SKIP", "No AI assistant configs found")
+    elif configured_count == installed_count:
+        _record("AI Assistants", "PASS",
+                 f"{configured_count}/{installed_count} assistants have Delimit configured")
+    else:
+        unconfigured = [k for k, v in config_sync.items() if v == "missing_delimit"]
+        _record("AI Assistants", "FAIL",
+                 f"{configured_count}/{installed_count} configured; missing in: {', '.join(unconfigured)}",
+                 "Run: npx delimit-cli setup")
+
+    # ── 5. Permission Status ─────────────────────────────────────────────
+    permission_info = {}
+    claude_settings = home / ".claude.json"
+    if claude_settings.exists():
+        try:
+            claude_data = json.loads(claude_settings.read_text())
+            allowed = claude_data.get("allowedTools",
+                        claude_data.get("permissions", {}).get("allow", []))
+            if isinstance(allowed, list):
+                delimit_allowed = [t for t in allowed if "delimit" in str(t).lower()]
+                permission_info["claude_code"] = {
+                    "auto_approved": len(delimit_allowed) > 0,
+                    "count": len(delimit_allowed),
+                }
+            else:
+                permission_info["claude_code"] = {"auto_approved": False, "count": 0}
+        except Exception:
+            permission_info["claude_code"] = {"status": "read_error"}
+    project_claude = p / ".claude" / "settings.json"
+    if project_claude.exists():
+        try:
+            pdata = json.loads(project_claude.read_text())
+            proj_allowed = pdata.get("allowedTools",
+                            pdata.get("permissions", {}).get("allow", []))
+            if isinstance(proj_allowed, list):
+                delimit_proj = [t for t in proj_allowed if "delimit" in str(t).lower()]
+                permission_info["claude_code_project"] = {
+                    "auto_approved": len(delimit_proj) > 0,
+                    "count": len(delimit_proj),
+                }
+        except Exception:
+            pass
+    checks["permissions"] = permission_info
+
+    if not permission_info:
+        _record("Permissions", "SKIP", "No permission config files found")
+    else:
+        any_approved = any(
+            v.get("auto_approved", False) for v in permission_info.values()
+            if isinstance(v, dict)
+        )
+        if any_approved:
+            _record("Permissions", "PASS", "Delimit tools are auto-approved")
+        else:
+            _record("Permissions", "FAIL",
+                     "Delimit tools require manual approval on each call",
+                     "Add 'mcp__delimit__*' to allowedTools in .claude.json or project settings")
+
+    # ── 6. API Keys ──────────────────────────────────────────────────────
+    environment = _detect_environment()
+    api_keys = environment.get("api_keys", {})
+    checks["api_keys"] = {k: "configured" for k in api_keys}
+
+    if api_keys:
+        _record("API Keys", "PASS",
+                 f"{len(api_keys)} configured: {', '.join(sorted(api_keys.keys()))}")
+    else:
+        _record("API Keys", "SKIP",
+                 "No API keys detected (set ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)")
+
+    # ── 7. Network Connectivity ──────────────────────────────────────────
+    network_checks = {}
+
+    def _check_url(label: str, url: str) -> bool:
+        try:
+            req = urllib.request.Request(url, method="HEAD")
+            resp = urllib.request.urlopen(req, timeout=5)
+            network_checks[label] = {"reachable": True, "status": resp.status}
+            return True
+        except Exception as exc:
+            network_checks[label] = {"reachable": False, "error": str(exc)[:120]}
+            return False
+
+    github_ok = _check_url("github_api", "https://api.github.com")
+    npm_ok = _check_url("npm_registry", "https://registry.npmjs.org/delimit-cli")
+    checks["network"] = network_checks
+
+    if github_ok and npm_ok:
+        _record("Network", "PASS", "GitHub API and npm registry reachable")
+    elif not github_ok and not npm_ok:
+        _record("Network", "FAIL", "Cannot reach GitHub API or npm registry",
+                 "Check internet connection and firewall/proxy settings")
+    else:
+        parts = []
+        if not github_ok:
+            parts.append("GitHub API unreachable")
+        if not npm_ok:
+            parts.append("npm registry unreachable")
+        _record("Network", "FAIL", "; ".join(parts),
+                 "Check internet connection and firewall/proxy settings")
+
+    # ── 8. Version Check ─────────────────────────────────────────────────
+    checks["version"] = VERSION
+    latest_version = None
+    try:
+        req = urllib.request.Request("https://registry.npmjs.org/delimit-cli/latest")
+        resp = urllib.request.urlopen(req, timeout=5)
+        npm_data = json.loads(resp.read().decode())
+        latest_version = npm_data.get("version")
+        checks["latest_npm_version"] = latest_version
+        if latest_version and latest_version != VERSION:
+            _record("Version", "FAIL",
+                     f"Running {VERSION}, latest npm is {latest_version}",
+                     f"npm update -g delimit-cli (or npx delimit-cli@{latest_version})")
+        elif latest_version:
+            _record("Version", "PASS", f"Running {VERSION} (latest)")
+        else:
+            _record("Version", "SKIP", f"Running {VERSION}, could not parse latest from npm")
+    except Exception:
+        _record("Version", "SKIP", f"Running {VERSION}, npm check unavailable")
+        checks["latest_npm_version"] = None
+
+    # ── 9. Daemon Status ─────────────────────────────────────────────────
+    daemon_info = {}
+
+    # Inbox daemon
+    try:
+        from ai.inbox_daemon import get_daemon_status as _inbox_status
+        inbox_st = _inbox_status()
+        running = inbox_st.get("running", inbox_st.get("status") == "running")
+        daemon_info["inbox"] = {"running": bool(running)}
+    except Exception:
+        daemon_info["inbox"] = {"running": False, "note": "module_unavailable"}
+
+    # Social daemon
+    try:
+        from ai.social_daemon import get_status as _social_status
+        social_st = _social_status()
+        running = social_st.get("running", social_st.get("status") == "running")
+        daemon_info["social"] = {"running": bool(running)}
+    except Exception:
+        daemon_info["social"] = {"running": False, "note": "module_unavailable"}
+
+    # Autonomous daemon
+    try:
+        from ai.daemon import get_daemon_status as _gen_status
+        gen_st = _gen_status()
+        running = gen_st.get("running", gen_st.get("status") == "running")
+        daemon_info["autonomous"] = {"running": bool(running)}
+    except Exception:
+        daemon_info["autonomous"] = {"running": False, "note": "module_unavailable"}
+
+    checks["daemons"] = daemon_info
+    running_daemons = [k for k, v in daemon_info.items() if v.get("running")]
+    stopped_daemons = [k for k, v in daemon_info.items() if not v.get("running")]
+
+    if running_daemons:
+        detail = f"Running: {', '.join(running_daemons)}"
+        if stopped_daemons:
+            detail += f"; stopped: {', '.join(stopped_daemons)}"
+        _record("Daemons", "PASS", detail)
+    else:
+        _record("Daemons", "SKIP",
+                 "No daemons running (start with delimit_inbox_daemon or delimit_daemon_run)")
+
+    # ── 10. Disk Usage ───────────────────────────────────────────────────
+    delimit_home = home / ".delimit"
+    if delimit_home.exists():
+        try:
+            total_bytes = 0
+            file_count = 0
+            for f in delimit_home.rglob("*"):
+                if f.is_file():
+                    try:
+                        total_bytes += f.stat().st_size
+                        file_count += 1
+                    except OSError:
+                        pass
+            if total_bytes < 1024:
+                size_str = f"{total_bytes} B"
+            elif total_bytes < 1024 * 1024:
+                size_str = f"{total_bytes / 1024:.1f} KB"
+            elif total_bytes < 1024 * 1024 * 1024:
+                size_str = f"{total_bytes / (1024 * 1024):.1f} MB"
+            else:
+                size_str = f"{total_bytes / (1024 * 1024 * 1024):.2f} GB"
+
+            checks["disk"] = {
+                "path": str(delimit_home),
+                "size_bytes": total_bytes,
+                "size_human": size_str,
+                "file_count": file_count,
+            }
+            if total_bytes > 500 * 1024 * 1024:
+                _record("Disk Usage", "FAIL",
+                         f"~/.delimit/ is {size_str} ({file_count} files) -- consider cleanup",
+                         "Remove old ledger entries or run: du -sh ~/.delimit/*/")
+            else:
+                _record("Disk Usage", "PASS",
+                         f"~/.delimit/ is {size_str} ({file_count} files)")
+        except Exception as exc:
+            _record("Disk Usage", "SKIP", f"Could not measure: {exc}")
+            checks["disk"] = {"error": str(exc)}
+    else:
+        _record("Disk Usage", "SKIP", "~/.delimit/ does not exist")
+        checks["disk"] = {"path": str(delimit_home), "exists": False}
+
+    # ── MCP Security Warnings (LED-192) ──────────────────────────────────
     mcp_warnings = []
     mcp_config_path = home / ".mcp.json"
     if mcp_config_path.exists():
@@ -4273,7 +4696,6 @@ def delimit_diagnose(project_path: str = ".") -> Dict[str, Any]:
             for server_name, server_cfg in mcp_data.get("mcpServers", {}).items():
                 cmd = server_cfg.get("command", "")
                 args = server_cfg.get("args", [])
-                # Check for risky patterns
                 if "curl" in cmd or "wget" in cmd:
                     mcp_warnings.append(f"{server_name}: command uses curl/wget (potential remote code execution)")
                 if any("--no-sandbox" in str(a) for a in args):
@@ -4287,21 +4709,31 @@ def delimit_diagnose(project_path: str = ".") -> Dict[str, Any]:
         for w in mcp_warnings:
             issues.append({"issue": f"MCP security: {w}", "fix": "Review server configuration"})
 
-    # Summary
-    status = "healthy" if not issues else "issues_found"
+    # ── Build Summary ────────────────────────────────────────────────────
+    pass_count = sum(1 for c in checklist if c["status"] == "PASS")
+    fail_count = sum(1 for c in checklist if c["status"] == "FAIL")
+    skip_count = sum(1 for c in checklist if c["status"] == "SKIP")
+    total_count = len(checklist)
+
+    status = "healthy" if fail_count == 0 else "issues_found"
     result = {
         "status": status,
+        "summary": f"{pass_count}/{total_count} checks passed, {fail_count} failed, {skip_count} skipped",
+        "checklist": checklist,
         "checks": checks,
         "issues": issues,
         "issue_count": len(issues),
-        "tip": "If everything looks good but tools aren't working, try restarting Claude Code.",
+        "tip": "If everything looks good but tools aren't working, try restarting your AI assistant."
+               " Run delimit_diagnose again after making fixes.",
     }
-    # Dynamic next_steps: suggest init if not initialized
+    # Dynamic next_steps
     diagnose_next = []
     if not delimit_dir.is_dir():
         diagnose_next.append({"tool": "delimit_init", "reason": "Initialize governance for this project", "suggested_args": {"preset": "default"}, "is_premium": False})
     if any(v == "missing_delimit" for v in config_sync.values()):
         diagnose_next.append({"tool": "delimit_quickstart", "reason": "Re-run setup to configure missing assistants", "is_premium": False})
+    if fail_count > 0:
+        diagnose_next.append({"tool": "delimit_help", "reason": "Get help on specific tools", "suggested_args": {"tool_name": "diagnose"}, "is_premium": False})
     result["next_steps"] = diagnose_next
     return result
 
@@ -4347,7 +4779,7 @@ def delimit_deploy_site(
     project_path: str = ".",
     message: str = "",
 ) -> Dict[str, Any]:
-    """Deploy a site — git commit, push, Vercel build, deploy (Pro)."""
+    """Deploy a site - git commit, push, Vercel build, deploy (Pro)."""
     return _delimit_deploy_impl(action="site", project_path=project_path, message=message)
 
 
@@ -4463,8 +4895,8 @@ def delimit_ledger_update(
     Args:
         item_id: The item ID (e.g. LED-001 or STR-001).
         venture: Project name or path. Auto-detects if empty.
-        status: New status — "open", "in_progress", "blocked", "done".
-        priority: New priority — "P0", "P1", "P2".
+        status: New status - "open", "in_progress", "blocked", "done".
+        priority: New priority - "P0", "P1", "P2".
         title: New title.
         description: New description.
         note: Add a note/comment to the item.
@@ -4518,8 +4950,8 @@ def delimit_ledger_list(
     Args:
         venture: Project name or path. Auto-detects if empty.
         ledger: "ops", "strategy", or "both".
-        status: Filter by status — "open", "done", "in_progress", or empty for all.
-        priority: Filter by priority — "P0", "P1", "P2", or empty for all.
+        status: Filter by status - "open", "done", "in_progress", or empty for all.
+        priority: Filter by priority - "P0", "P1", "P2", or empty for all.
         limit: Max items to return.
     """
     from ai.ledger_manager import list_items
@@ -4584,7 +5016,7 @@ def delimit_ledger_link(
     Args:
         from_id: Source item ID (e.g. "LED-025").
         to_id: Target item ID (e.g. "STR-005").
-        link_type: Relationship type — "blocks", "blocked_by", "parent", "child", "relates_to", "duplicates".
+        link_type: Relationship type - "blocks", "blocked_by", "parent", "child", "relates_to", "duplicates".
         note: Optional note explaining the relationship.
         venture: Project name or path. Auto-detects if empty.
     """
@@ -4689,7 +5121,7 @@ def delimit_ventures() -> Dict[str, Any]:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  SESSION PHOENIX — Cross-Model Resurrection (LED-218)
+#  SESSION PHOENIX - Cross-Model Resurrection (LED-218)
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -5355,7 +5787,7 @@ def delimit_quickstart(project_path: str = ".") -> Dict[str, Any]:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  STR-049: SECRETS BROKER — JIT credential access with audit
+#  STR-049: SECRETS BROKER - JIT credential access with audit
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -5455,7 +5887,7 @@ def delimit_secret_access_log(name: str = "") -> Dict[str, Any]:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  STR-048: Context Filesystem — versioned namespace for agent state
+#  STR-048: Context Filesystem - versioned namespace for agent state
 # ═══════════════════════════════════════════════════════════════════════
 
 # Consensus 082 Phase 2: Unified context tool with action parameter
@@ -5573,7 +6005,7 @@ def delimit_context_branch(venture: str, action: str = "list", branch_name: str 
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  STR-050: DATA/ACTION PLANE — External systems as typed mounted resources
+#  STR-050: DATA/ACTION PLANE - External systems as typed mounted resources
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -5677,7 +6109,7 @@ def delimit_tracker_sync(
 ) -> Dict[str, Any]:
     """Pull open issues from GitHub into the Delimit ledger as context.
 
-    Read-only sync — enriches your ledger with external issue context.
+    Read-only sync - enriches your ledger with external issue context.
     Does NOT write back to GitHub.
 
     Args:
@@ -5836,7 +6268,7 @@ def delimit_webhook_manage(
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  SOCIAL MEDIA — Authentic engagement at scale (Pro)
+#  SOCIAL MEDIA - Authentic engagement at scale (Pro)
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -5847,18 +6279,18 @@ def delimit_social_post(text: str = "", category: str = "", platform: str = "twi
                         context: str = "") -> Dict[str, Any]:
     """Post to social media (Pro).
 
-    IMPORTANT — AUTO-TRIGGER RULE:
+    IMPORTANT - AUTO-TRIGGER RULE:
     When the AI drafts a social post, it MUST call this tool immediately.
-    Never ask "want me to send this?" — just call the tool. The email-based
+    Never ask "want me to send this?" - just call the tool. The email-based
     approval flow handles human review. The AI's job is to draft and send,
     the founder's job is to approve/reject via email reply.
 
     Categories: tip, changelog, insight, engagement.
     Leave text empty to auto-generate from templates.
-    Every post provides value — tips, insights, governance wisdom.
+    Every post provides value - tips, insights, governance wisdom.
     Max 2 posts per day to stay authentic.
 
-    IMPORTANT — Platform tone rules (these are DIFFERENT per platform):
+    IMPORTANT - Platform tone rules (these are DIFFERENT per platform):
     - Twitter: confident technical brand. Direct, professional, ALWAYS POSITIVE.
       Celebrate wins and progress. Never complain or air gaps publicly.
       No em dashes or en dashes. Default to insight-first with no CTA unless source-grounded.
@@ -5884,12 +6316,12 @@ def delimit_social_post(text: str = "", category: str = "", platform: str = "twi
 
     post = generate_post(category, text)
 
-    # ALL platforms go through email approval — no direct posting.
+    # ALL platforms go through email approval - no direct posting.
     # Founder reviews and posts manually from their device.
     if platform not in ("twitter", "reddit"):
         return {"error": f"Platform '{platform}' not supported yet", "supported": ["twitter", "reddit"]}
 
-    # ── Draft quality gate — reject template stubs and platform mismatches ──
+    # ── Draft quality gate - reject template stubs and platform mismatches ──
     _draft_text = text or post.get("text", "")
     _stub_patterns = [
         "[DRAFT - needs human writing]",
@@ -5969,7 +6401,7 @@ def delimit_social_post(text: str = "", category: str = "", platform: str = "twi
                 _lines.append(f"Platform: REDDIT as u/{_acct}")
                 _lines.append("Owner action: Open the thread and reply using the draft below.")
             else:
-                # New Reddit post — extract title from first line of text
+                # New Reddit post - extract title from first line of text
                 _post_text = post["text"]
                 _first_newline = _post_text.find("\n")
                 if _first_newline > 0 and _first_newline < 200:
@@ -5981,13 +6413,11 @@ def delimit_social_post(text: str = "", category: str = "", platform: str = "twi
                 _lines.append(f"Platform: REDDIT as u/{_acct}")
                 _lines.append("Owner action: Navigate to the subreddit and create a new post.")
                 _lines.append("")
-                _lines.append("Post Title")
-                _lines.append("Tap and hold inside this block to copy.")
+                _lines.append("--- TITLE (paste in title field) ---")
                 _lines.append(_reddit_title)
-                _lines.append("")
-                _lines.append("Post Body")
-                _lines.append("Tap and hold inside this block to copy.")
+                _lines.append("--- BODY (paste in body field) ---")
                 _lines.append(_reddit_body)
+                _lines.append("--- END COPY ---")
                 _lines.append("")
                 _lines.append(f"Draft ID: {entry['draft_id']}")
                 if entry.get("tone_warnings"):
@@ -6020,9 +6450,9 @@ def delimit_social_post(text: str = "", category: str = "", platform: str = "twi
             _lines.append("Owner action: Open X, compose a new post, paste the draft below.")
 
         _lines.append("")
-        _lines.append("Manual Post Text")
-        _lines.append("Tap and hold inside this block to copy.")
+        _lines.append("--- COPY BELOW THIS LINE ---")
         _lines.append(post["text"])
+        _lines.append("--- END COPY ---")
         _lines.append("")
         _lines.append(f"Draft ID: {entry['draft_id']}")
         if entry.get("tone_warnings"):
@@ -6096,7 +6526,7 @@ def delimit_social_history(limit: int = 20, platform: str = "",
 
     Args:
         limit: Max entries to return.
-        platform: Filter by platform — "twitter" or "reddit".
+        platform: Filter by platform - "twitter" or "reddit".
         user: Filter by Reddit user we interacted with (e.g. "coolinjapan001").
         subreddit: Filter by subreddit (e.g. "r/vibecoding").
     """
@@ -6151,7 +6581,7 @@ def delimit_social_target(
 ) -> Dict[str, Any]:
     """Discover engagement opportunities across platforms (Pro).
 
-    IMPORTANT — TOOL CHAINING RULE:
+    IMPORTANT - TOOL CHAINING RULE:
     After scanning, the AI MUST immediately process results:
     1. For "reply" targets: draft a reply via delimit_social_post or delimit_notify
     2. For "strategic" targets: create a ledger item via delimit_ledger_add
@@ -6297,7 +6727,7 @@ def delimit_github_scan(
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  CONTENT ENGINE — Autonomous video + tweet pipeline (Pro)
+#  CONTENT ENGINE - Autonomous video + tweet pipeline (Pro)
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -6364,7 +6794,7 @@ def delimit_content_queue(action: str = "status", items: str = "") -> Dict[str, 
 
 @mcp.tool()
 def delimit_daemon_status() -> Dict[str, Any]:
-    """Check autonomous daemon status — loops, items processed, recent actions."""
+    """Check autonomous daemon status - loops, items processed, recent actions."""
     from ai.daemon import get_daemon_status
     return _with_next_steps("daemon_status", get_daemon_status())
 
@@ -6387,7 +6817,7 @@ def delimit_build_loop(action: str = "run", session_id: str = "") -> Dict[str, A
     """Execute the governed continuous build loop (LED-239).
 
     Requirements:
-    - root ledger in /root/.delimit is authoritative
+    - root ledger in ~/.delimit is authoritative
     - select only build-safe open items
     - resolve venture + repo before dispatch
     - use Delimit swarm/governance as control plane
@@ -6489,7 +6919,7 @@ def delimit_social_daemon(action: str = "status") -> Dict[str, Any]:
         return _with_next_steps("social_daemon", get_daemon_status())
 
 # ═══════════════════════════════════════════════════════════════════════
-#  LED-187: Shareable Governance Config — export / import
+#  LED-187: Shareable Governance Config - export / import
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -6690,22 +7120,48 @@ def delimit_screenshot(url: str, name: str = "screenshot") -> Dict[str, Any]:
 
 @mcp.tool()
 def delimit_changelog(old_spec: str = "", new_spec: str = "", format: str = "markdown",
-                      version: str = "") -> Dict[str, Any]:
-    """Generate a changelog from API spec changes.
+                      version: str = "", repo_path: str = "", since_tag: str = "",
+                      include_ledger: bool = True, output_file: str = "") -> Dict[str, Any]:
+    """Generate a changelog from git commits + ledger, or from API spec changes.
 
-    Compares two OpenAPI specs and produces a human-readable changelog.
+    Two modes:
+    1. **Git mode** (pass repo_path): reads git log since last tag, categorizes
+       commits (feat/fix/refactor/docs/test/ci), pulls completed ledger items,
+       and formats as clean Markdown. Works for ANY repo.
+    2. **Spec mode** (pass old_spec + new_spec): compares two OpenAPI specs and
+       produces a changelog of API changes. Original behavior.
+
     Formats: markdown, json, keepachangelog, github-release.
 
     Args:
-        old_spec: Path to old OpenAPI spec (or content).
-        new_spec: Path to new OpenAPI spec (or content).
+        old_spec: Path to old OpenAPI spec (spec mode only).
+        new_spec: Path to new OpenAPI spec (spec mode only).
         format: Output format (markdown, json, keepachangelog, github-release).
-        version: Version label for the changelog entry.
+        version: Version label for the changelog entry (e.g. "4.1.0").
+        repo_path: Path to a git repository (git mode). When set, uses git log.
+        since_tag: Git tag to diff from (default: auto-detect latest tag).
+        include_ledger: Pull completed ledger items into changelog (git mode, default true).
+        output_file: Write changelog to this file path. If CHANGELOG.md, prepends entry.
     """
+    # Git mode: generate from commits + ledger
+    if repo_path:
+        from backends.gateway_core import run_changelog_from_git
+        return _with_next_steps("changelog", _safe_call(
+            run_changelog_from_git,
+            repo_path=repo_path,
+            version=version,
+            fmt=format,
+            since_tag=since_tag,
+            include_ledger=include_ledger,
+            output_file=output_file,
+        ))
+
+    # Spec mode: original behavior
     if not old_spec or not new_spec:
         return _with_next_steps("changelog", {
-            "error": "Both old_spec and new_spec are required.",
-            "usage": "Provide paths to two OpenAPI spec files to generate a changelog.",
+            "error": "Provide repo_path for git mode, or old_spec + new_spec for spec mode.",
+            "usage_git": "delimit_changelog(repo_path='/path/to/repo', version='1.2.0')",
+            "usage_spec": "delimit_changelog(old_spec='old.yaml', new_spec='new.yaml')",
         })
     from backends.gateway_core import run_changelog
     return _with_next_steps("changelog", _safe_call(
@@ -6720,16 +7176,16 @@ def delimit_notify(channel: str = "webhook", message: str = "",
                    from_account: str = "") -> Dict[str, Any]:
     """Send a notification (Pro).
 
-    IMPORTANT — AUTO-TRIGGER RULE:
+    IMPORTANT - AUTO-TRIGGER RULE:
     When the AI identifies something requiring owner action (outreach reply,
     deployment decision, approval needed), it MUST call this tool immediately.
-    Never ask "want me to notify you?" — just send the notification.
+    Never ask "want me to notify you?" - just send the notification.
     The founder reviews and acts via email. All tools must chain automatically.
 
     Channels: webhook (JSON POST), slack (webhook URL), email (SMTP).
     Use for: governance alerts, deployment notifications, breaking change warnings.
 
-    IMPORTANT — Email context rules:
+    IMPORTANT - Email context rules:
     Every email must be self-contained and actionable. The recipient reads on mobile
     and needs to know exactly what to do without opening another app.
     - Subject: lead with [ACTION TYPE] bracket, include enough context to triage from inbox
@@ -6743,7 +7199,7 @@ def delimit_notify(channel: str = "webhook", message: str = "",
         subject: Subject line (email only). Use [ACTION], [INFO], [ALERT] prefix.
         event_type: Event category for filtering.
         to: Recipient email address (email only). Overrides default DELIMIT_SMTP_TO.
-            Send to any address — leave empty for default.
+            Send to any address - leave empty for default.
         from_account: Sender account key from ~/.delimit/secrets/smtp-all.json
             (e.g. 'notifications@example.com'). Email only.
     """
@@ -6888,7 +7344,7 @@ def delimit_notify_inbox(action: str = "status", limit: int = 10,
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  TIER 5: AGENT ORCHESTRATION — Multi-agent dispatch, tracking, handoff
+#  TIER 5: AGENT ORCHESTRATION - Multi-agent dispatch, tracking, handoff
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -7121,7 +7577,7 @@ def delimit_next_task(venture: str = "", max_risk: str = "", session_id: str = "
     """Get the next task to work on (Pro).
 
     Returns the highest-priority open item with safeguard checks.
-    Part of the autonomous build loop — call this to start or continue working.
+    Part of the autonomous build loop - call this to start or continue working.
 
     Returns action: BUILD (with task), CONSENSUS (generate new items), or STOP (safeguard tripped).
 
@@ -7148,7 +7604,7 @@ def delimit_ledger_propose(venture: str = "", focus: str = "",
 
     Args:
         venture: Focus on a specific venture (auto-detects if empty).
-        focus: Optional area filter — "outreach", "engineering", "security", etc.
+        focus: Optional area filter - "outreach", "engineering", "security", etc.
         max_items: Maximum proposals to generate (default 5).
     """
     from ai.ledger_propose import propose_items
@@ -7222,7 +7678,7 @@ def delimit_loop_config(session_id: str = "", max_iterations: int = 0,
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  LED-219: Toolcard Delta Cache — reduce MCP tool schema token waste
+#  LED-219: Toolcard Delta Cache - reduce MCP tool schema token waste
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -7300,7 +7756,7 @@ def delimit_toolcard_cache(
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  HANDOFF RECEIPTS — Agent-to-Agent Structured Handoffs (LED-220)
+#  HANDOFF RECEIPTS - Agent-to-Agent Structured Handoffs (LED-220)
 # ═══════════════════════════════════════════════════════════════════════
 
 

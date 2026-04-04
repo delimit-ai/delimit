@@ -30,7 +30,7 @@ OWN_REPOS = [
     "delimit-ai/delimit-quickstart",
 ]
 
-INTERNAL_USERS = {"infracore", "crypttrx"}
+INTERNAL_USERS = set()  # configured at runtime
 
 COMPETITOR_ACTIONS = [
     "tufin/oasdiff-action",
