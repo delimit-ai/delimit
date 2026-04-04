@@ -907,175 +907,6 @@ def run_zero_spec(
     return result
 
 
-def run_diff_report(
-    old_spec: str,
-    new_spec: str,
-    fmt: str = "html",
-    output_file: Optional[str] = None,
-    policy_file: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Generate a rich comparison report for two API spec versions.
-
-    Runs the full analysis pipeline (diff, policy, semver, health) and
-    produces a self-contained HTML report or structured JSON suitable
-    for sharing across teams.
-
-    Args:
-        old_spec: Path to the baseline OpenAPI spec.
-        new_spec: Path to the proposed OpenAPI spec.
-        fmt: Output format -- "html" or "json".
-        output_file: Optional path to write the report file.
-        policy_file: Optional custom policy YAML.
-
-    Returns:
-        Dict with report content, metadata, and analysis results.
-    """
-    from datetime import datetime, timezone
-
-    from core.diff_engine_v2 import OpenAPIDiffEngine
-    from core.policy_engine import PolicyEngine
-    from core.semver_classifier import classify_detailed, classify
-    from core.spec_health import score_spec
-    from core.explainer import explain
-
-    old = _load_specs(old_spec)
-    new = _load_specs(new_spec)
-
-    # -- Diff --
-    engine = OpenAPIDiffEngine()
-    changes = engine.compare(old, new)
-
-    breaking = [c for c in changes if c.is_breaking]
-    non_breaking = [c for c in changes if not c.is_breaking]
-
-    change_dicts = [
-        {
-            "type": c.type.value,
-            "path": c.path,
-            "message": c.message,
-            "is_breaking": c.is_breaking,
-            "details": c.details,
-        }
-        for c in changes
-    ]
-
-    # -- Semver --
-    semver = classify_detailed(changes)
-    bump = classify(changes)
-
-    # -- Policy --
-    policy_engine = PolicyEngine(policy_file)
-    violations = policy_engine.evaluate(changes)
-
-    has_errors = any(v.severity == "error" for v in violations)
-    has_warnings = any(v.severity == "warning" for v in violations)
-    if has_errors:
-        gate_decision = "fail"
-    elif has_warnings:
-        gate_decision = "warn"
-    else:
-        gate_decision = "pass"
-
-    violation_dicts = [
-        {
-            "rule": v.rule_id,
-            "name": v.rule_name,
-            "severity": v.severity,
-            "message": v.message,
-            "path": v.change.path,
-        }
-        for v in violations
-    ]
-
-    # -- Spec health --
-    old_health = score_spec(old)
-    new_health = score_spec(new)
-
-    # -- Migration guide (only if breaking changes exist) --
-    migration_text = ""
-    if breaking:
-        try:
-            old_ver = old.get("info", {}).get("version")
-            new_ver = new.get("info", {}).get("version")
-            migration_text = explain(
-                changes,
-                template="migration",
-                old_version=old_ver,
-                new_version=new_ver,
-            )
-        except Exception:
-            migration_text = ""
-
-    now = datetime.now(timezone.utc)
-    report_data = {
-        "generated_at": now.isoformat(),
-        "old_spec": old_spec,
-        "new_spec": new_spec,
-        "old_version": old.get("info", {}).get("version", "unknown"),
-        "new_version": new.get("info", {}).get("version", "unknown"),
-        "old_title": old.get("info", {}).get("title", ""),
-        "new_title": new.get("info", {}).get("title", ""),
-        "semver": {
-            "bump": semver["bump"],
-            "is_breaking": semver["is_breaking"],
-            "counts": semver["counts"],
-        },
-        "changes": change_dicts,
-        "breaking_count": len(breaking),
-        "non_breaking_count": len(non_breaking),
-        "total_changes": len(changes),
-        "policy": {
-            "decision": gate_decision,
-            "violations": violation_dicts,
-            "errors": len([v for v in violations if v.severity == "error"]),
-            "warnings": len([v for v in violations if v.severity == "warning"]),
-        },
-        "health": {
-            "old": old_health,
-            "new": new_health,
-        },
-        "migration_guide": migration_text,
-    }
-
-    if fmt == "json":
-        wrote_file = ""
-        if output_file:
-            p = Path(output_file)
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(json.dumps(report_data, indent=2, default=str), encoding="utf-8")
-            wrote_file = str(p)
-        return {
-            "format": "json",
-            "wrote_file": wrote_file,
-            "report": report_data,
-        }
-
-    # -- HTML generation --
-    html = _render_diff_report_html(report_data)
-
-    wrote_file = ""
-    if output_file:
-        p = Path(output_file)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(html, encoding="utf-8")
-        wrote_file = str(p)
-
-    return {
-        "format": "html",
-        "wrote_file": wrote_file,
-        "html": html,
-        "summary": {
-            "total_changes": report_data["total_changes"],
-            "breaking_count": report_data["breaking_count"],
-            "non_breaking_count": report_data["non_breaking_count"],
-            "semver_bump": report_data["semver"]["bump"],
-            "policy_decision": report_data["policy"]["decision"],
-            "old_health_grade": old_health.get("grade", "?"),
-            "new_health_grade": new_health.get("grade", "?"),
-        },
-    }
-
-
 def _render_diff_report_html(data: Dict[str, Any]) -> str:
     """Render the diff report data as a self-contained HTML document."""
     import html as html_mod
@@ -1482,3 +1313,172 @@ def _render_diff_report_html(data: Dict[str, Any]) -> str:
 </html>"""
 
     return html
+
+
+def run_diff_report(
+    old_spec: str,
+    new_spec: str,
+    fmt: str = "html",
+    output_file: Optional[str] = None,
+    policy_file: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Generate a rich comparison report for two API spec versions.
+
+    Runs the full analysis pipeline (diff, policy, semver, health) and
+    produces a self-contained HTML report or structured JSON suitable
+    for sharing across teams.
+
+    Args:
+        old_spec: Path to the baseline OpenAPI spec.
+        new_spec: Path to the proposed OpenAPI spec.
+        fmt: Output format -- "html" or "json".
+        output_file: Optional path to write the report file.
+        policy_file: Optional custom policy YAML.
+
+    Returns:
+        Dict with report content, metadata, and analysis results.
+    """
+    from datetime import datetime, timezone
+
+    from core.diff_engine_v2 import OpenAPIDiffEngine
+    from core.policy_engine import PolicyEngine
+    from core.semver_classifier import classify_detailed, classify
+    from core.spec_health import score_spec
+    from core.explainer import explain
+
+    old = _load_specs(old_spec)
+    new = _load_specs(new_spec)
+
+    # -- Diff --
+    engine = OpenAPIDiffEngine()
+    changes = engine.compare(old, new)
+
+    breaking = [c for c in changes if c.is_breaking]
+    non_breaking = [c for c in changes if not c.is_breaking]
+
+    change_dicts = [
+        {
+            "type": c.type.value,
+            "path": c.path,
+            "message": c.message,
+            "is_breaking": c.is_breaking,
+            "details": c.details,
+        }
+        for c in changes
+    ]
+
+    # -- Semver --
+    semver = classify_detailed(changes)
+    bump = classify(changes)
+
+    # -- Policy --
+    policy_engine = PolicyEngine(policy_file)
+    violations = policy_engine.evaluate(changes)
+
+    has_errors = any(v.severity == "error" for v in violations)
+    has_warnings = any(v.severity == "warning" for v in violations)
+    if has_errors:
+        gate_decision = "fail"
+    elif has_warnings:
+        gate_decision = "warn"
+    else:
+        gate_decision = "pass"
+
+    violation_dicts = [
+        {
+            "rule": v.rule_id,
+            "name": v.rule_name,
+            "severity": v.severity,
+            "message": v.message,
+            "path": v.change.path,
+        }
+        for v in violations
+    ]
+
+    # -- Spec health --
+    old_health = score_spec(old)
+    new_health = score_spec(new)
+
+    # -- Migration guide (only if breaking changes exist) --
+    migration_text = ""
+    if breaking:
+        try:
+            old_ver = old.get("info", {}).get("version")
+            new_ver = new.get("info", {}).get("version")
+            migration_text = explain(
+                changes,
+                template="migration",
+                old_version=old_ver,
+                new_version=new_ver,
+            )
+        except Exception:
+            migration_text = ""
+
+    now = datetime.now(timezone.utc)
+    report_data = {
+        "generated_at": now.isoformat(),
+        "old_spec": old_spec,
+        "new_spec": new_spec,
+        "old_version": old.get("info", {}).get("version", "unknown"),
+        "new_version": new.get("info", {}).get("version", "unknown"),
+        "old_title": old.get("info", {}).get("title", ""),
+        "new_title": new.get("info", {}).get("title", ""),
+        "semver": {
+            "bump": semver["bump"],
+            "is_breaking": semver["is_breaking"],
+            "counts": semver["counts"],
+        },
+        "changes": change_dicts,
+        "breaking_count": len(breaking),
+        "non_breaking_count": len(non_breaking),
+        "total_changes": len(changes),
+        "policy": {
+            "decision": gate_decision,
+            "violations": violation_dicts,
+            "errors": len([v for v in violations if v.severity == "error"]),
+            "warnings": len([v for v in violations if v.severity == "warning"]),
+        },
+        "health": {
+            "old": old_health,
+            "new": new_health,
+        },
+        "migration_guide": migration_text,
+    }
+
+    if fmt == "json":
+        wrote_file = ""
+        if output_file:
+            p = Path(output_file)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(report_data, indent=2, default=str), encoding="utf-8")
+            wrote_file = str(p)
+        return {
+            "format": "json",
+            "wrote_file": wrote_file,
+            "report": report_data,
+        }
+
+    # -- HTML generation --
+    html = _render_diff_report_html(report_data)
+
+    wrote_file = ""
+    if output_file:
+        p = Path(output_file)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(html, encoding="utf-8")
+        wrote_file = str(p)
+
+    return {
+        "format": "html",
+        "wrote_file": wrote_file,
+        "html": html,
+        "summary": {
+            "total_changes": report_data["total_changes"],
+            "breaking_count": report_data["breaking_count"],
+            "non_breaking_count": report_data["non_breaking_count"],
+            "semver_bump": report_data["semver"]["bump"],
+            "policy_decision": report_data["policy"]["decision"],
+            "old_health_grade": old_health.get("grade", "?"),
+            "new_health_grade": new_health.get("grade", "?"),
+        },
+    }
