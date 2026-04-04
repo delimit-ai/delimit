@@ -2560,6 +2560,183 @@ program
         }
     });
 
+// PR review command — review any GitHub PR for breaking API changes
+program
+    .command('pr <url>')
+    .description('Review a GitHub PR for breaking API changes')
+    .action(async (url) => {
+        console.log(chalk.bold('\n  Delimit PR Review\n'));
+
+        // Parse GitHub PR URL: owner/repo#number or full URL
+        let owner, repo, prNumber;
+        const urlMatch = url.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+        const shortMatch = url.match(/^([^/]+)\/([^#]+)#(\d+)$/);
+        if (urlMatch) {
+            [, owner, repo, prNumber] = urlMatch;
+        } else if (shortMatch) {
+            [, owner, repo, prNumber] = shortMatch;
+        } else if (/^\d+$/.test(url)) {
+            // Just a number — try current repo
+            try {
+                const remote = execSync('git remote get-url origin 2>/dev/null', { encoding: 'utf-8' }).trim();
+                const remoteMatch = remote.match(/github\.com[:/]([^/]+)\/([^/.]+)/);
+                if (remoteMatch) {
+                    [, owner, repo] = remoteMatch;
+                    prNumber = url;
+                }
+            } catch {}
+        }
+
+        if (!owner || !repo || !prNumber) {
+            console.log(chalk.red('  Could not parse PR URL.'));
+            console.log(chalk.gray('  Usage: npx delimit-cli pr owner/repo#123'));
+            console.log(chalk.gray('         npx delimit-cli pr https://github.com/owner/repo/pull/123'));
+            console.log(chalk.gray('         npx delimit-cli pr 123  (in a git repo)\n'));
+            return;
+        }
+
+        console.log(chalk.gray(`  Reviewing ${owner}/${repo}#${prNumber}...\n`));
+
+        // Get PR changed files
+        try {
+            const filesJson = execSync(
+                `gh api repos/${owner}/${repo}/pulls/${prNumber}/files --paginate 2>/dev/null`,
+                { encoding: 'utf-8', timeout: 15000 }
+            );
+            const files = JSON.parse(filesJson);
+            const specPatterns = ['openapi', 'swagger', 'api-spec', 'api_spec'];
+            const specExts = ['.yaml', '.yml', '.json'];
+            const specFiles = files.filter(f => {
+                const name = f.filename.toLowerCase();
+                return specExts.some(ext => name.endsWith(ext)) &&
+                       specPatterns.some(p => name.includes(p));
+            });
+
+            if (specFiles.length === 0) {
+                console.log(chalk.gray('  No OpenAPI/Swagger spec changes found in this PR.'));
+                console.log(chalk.gray('  Delimit reviews PRs that modify API spec files.\n'));
+                // Show what files were changed
+                const apiFiles = files.filter(f => f.filename.includes('api') || f.filename.includes('spec'));
+                if (apiFiles.length > 0) {
+                    console.log(chalk.gray('  API-related files changed:'));
+                    apiFiles.slice(0, 5).forEach(f => console.log(chalk.gray(`    ${f.filename} (+${f.additions}/-${f.deletions})`)));
+                    console.log('');
+                }
+                return;
+            }
+
+            console.log(`  ${chalk.green('✓')} Found ${specFiles.length} spec file(s) changed:\n`);
+            specFiles.forEach(f => {
+                console.log(`    ${chalk.cyan(f.filename)} (+${f.additions}/-${f.deletions})`);
+            });
+            console.log('');
+
+            // Fetch base and head versions of the first spec
+            const specFile = specFiles[0];
+            const tmpDir = path.join(os.tmpdir(), `delimit-pr-${Date.now()}`);
+            fs.mkdirSync(tmpDir, { recursive: true });
+
+            // Get PR details for base/head refs
+            const prJson = execSync(
+                `gh api repos/${owner}/${repo}/pulls/${prNumber} 2>/dev/null`,
+                { encoding: 'utf-8', timeout: 10000 }
+            );
+            const pr = JSON.parse(prJson);
+            const baseSha = pr.base.sha;
+            const headSha = pr.head.sha;
+
+            // Fetch both versions
+            const basePath = path.join(tmpDir, 'base.yaml');
+            const headPath = path.join(tmpDir, 'head.yaml');
+
+            try {
+                const baseContent = execSync(
+                    `gh api repos/${owner}/${repo}/contents/${specFile.filename}?ref=${baseSha} -q '.content' 2>/dev/null`,
+                    { encoding: 'utf-8', timeout: 10000 }
+                );
+                fs.writeFileSync(basePath, Buffer.from(baseContent.trim(), 'base64').toString());
+            } catch {
+                console.log(chalk.yellow('  New spec file (no base version). Cannot diff.\n'));
+                fs.rmSync(tmpDir, { recursive: true, force: true });
+                return;
+            }
+
+            try {
+                const headContent = execSync(
+                    `gh api repos/${owner}/${repo}/contents/${specFile.filename}?ref=${headSha} -q '.content' 2>/dev/null`,
+                    { encoding: 'utf-8', timeout: 10000 }
+                );
+                fs.writeFileSync(headPath, Buffer.from(headContent.trim(), 'base64').toString());
+            } catch {
+                console.log(chalk.red('  Could not fetch head version of spec.\n'));
+                fs.rmSync(tmpDir, { recursive: true, force: true });
+                return;
+            }
+
+            // Run lint
+            console.log(chalk.gray('  Running governance pipeline...\n'));
+            const bundledGateway = path.join(__dirname, '..', 'gateway');
+            const serverDir = (continuityContext.serverDir && fs.existsSync(continuityContext.serverDir))
+                ? continuityContext.serverDir
+                : fs.existsSync(bundledGateway) ? bundledGateway : null;
+
+            if (!serverDir) {
+                console.log(chalk.yellow('  Gateway not available. Run: npx delimit-cli setup\n'));
+                fs.rmSync(tmpDir, { recursive: true, force: true });
+                return;
+            }
+
+            try {
+                const result = execSync(
+                    `python3 -c "
+import sys,json,yaml
+sys.path.insert(0,'${serverDir}')
+from core.diff_engine_v2 import OpenAPIDiffEngine
+old=yaml.safe_load(open('${basePath}'))
+new=yaml.safe_load(open('${headPath}'))
+engine=OpenAPIDiffEngine()
+changes=engine.compare(old,new)
+print(json.dumps({'changes':[{'type':c.type.value if hasattr(c.type,'value') else str(c.type),'path':c.path,'breaking':c.severity in ('high','critical','error'),'detail':c.message or c.details or ''} for c in changes]}))
+"`,
+                    { encoding: 'utf-8', timeout: 15000, cwd: serverDir }
+                );
+                const diff = JSON.parse(result);
+                const breaking = (diff.changes || []).filter(c => c.breaking);
+                const nonBreaking = (diff.changes || []).filter(c => !c.breaking);
+
+                if (breaking.length > 0) {
+                    console.log(chalk.red.bold(`  ${breaking.length} BREAKING change(s) detected\n`));
+                    breaking.forEach(c => {
+                        console.log(`  ${chalk.red('BREAK')} ${c.type}: ${c.path || ''}`);
+                        if (c.detail) console.log(chalk.gray(`        ${c.detail}`));
+                    });
+                } else {
+                    console.log(chalk.green.bold('  No breaking changes detected'));
+                }
+
+                if (nonBreaking.length > 0) {
+                    console.log(chalk.gray(`\n  ${nonBreaking.length} non-breaking change(s)`));
+                }
+
+                // Semver classification
+                const bump = breaking.length > 0 ? 'MAJOR' : nonBreaking.length > 0 ? 'MINOR' : 'NONE';
+                console.log(`\n  Semver: ${chalk.bold(bump)}`);
+                console.log(`  Total: ${(diff.changes || []).length} changes (${breaking.length} breaking, ${nonBreaking.length} compatible)\n`);
+
+                console.log(chalk.bold('  Add to your repo:'));
+                console.log(chalk.green(`    npx delimit-cli init`));
+                console.log(chalk.gray('    Catches this on every PR automatically.\n'));
+            } catch (e) {
+                console.log(chalk.red(`  Diff failed: ${e.message.split('\n')[0]}\n`));
+            }
+
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        } catch (e) {
+            console.log(chalk.red(`  Error: ${e.message.split('\n')[0]}`));
+            console.log(chalk.gray('  Make sure gh CLI is authenticated: gh auth login\n'));
+        }
+    });
+
 // Try command — zero-risk demo with Markdown report artifact (LED-264)
 program
     .command('try')
@@ -3133,23 +3310,56 @@ program
             process.exit(1);
         }
 
+        console.log(chalk.gray('  Validating license key...'));
+
+        // Validate against Lemon Squeezy API
+        let validated = false;
+        let licenseId = null;
+        let customerEmail = '';
+        try {
+            const resp = await axios.post('https://api.lemonsqueezy.com/v1/licenses/validate', {
+                license_key: key,
+            }, {
+                headers: { 'Accept': 'application/json' },
+                timeout: 10000,
+            });
+            if (resp.data && resp.data.valid) {
+                validated = true;
+                licenseId = resp.data.license_key?.id;
+                customerEmail = resp.data.meta?.customer_email || '';
+                console.log(chalk.green('  License valid.'));
+            } else {
+                console.log(chalk.red(`  License invalid: ${resp.data?.error || 'unknown error'}`));
+                process.exit(1);
+            }
+        } catch (err) {
+            // If API unreachable, accept locally (grace period)
+            console.log(chalk.yellow('  Could not reach license server. Activating locally (7-day grace).'));
+            validated = true;
+        }
+
         // Write license file
         const crypto = require('crypto');
         const machineHash = crypto.createHash('sha256').update(os.homedir()).digest('hex').slice(0, 16);
         const licenseData = {
             key: key,
             tier: 'pro',
-            valid: true,
+            valid: validated,
+            license_id: licenseId,
+            customer_email: customerEmail,
             activated_at: Date.now() / 1000,
             machine_hash: machineHash,
+            validated_at: Date.now() / 1000,
         };
 
         if (!fs.existsSync(licenseDir)) {
             fs.mkdirSync(licenseDir, { recursive: true });
         }
         fs.writeFileSync(licensePath, JSON.stringify(licenseData, null, 2));
-        console.log(chalk.green('License activated successfully.'));
-        console.log(chalk.dim('Tier: pro'));
+        console.log(chalk.green('\n  License activated successfully.'));
+        console.log(chalk.dim(`  Tier: pro`));
+        if (customerEmail) console.log(chalk.dim(`  Email: ${customerEmail}`));
+        console.log('');
     });
 
 // ---------------------------------------------------------------------------
