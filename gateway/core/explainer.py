@@ -33,44 +33,10 @@ TEMPLATES = [
 ]
 
 
-def explain(
-    changes: List[Change],
-    template: str = "developer",
-    old_version: Optional[str] = None,
-    new_version: Optional[str] = None,
-    api_name: Optional[str] = None,
-) -> str:
-    """Generate a human-readable explanation of API changes.
-
-    Args:
-        changes: List of Change objects from the diff engine.
-        template: One of the 7 template names.
-        old_version: Previous API version (e.g. "1.0.0").
-        new_version: New API version (e.g. "2.0.0").
-        api_name: Optional API/service name for context.
-
-    Returns:
-        Formatted explanation string.
-    """
-    detail = classify_detailed(changes)
-    ctx = _build_context(detail, changes, old_version, new_version, api_name)
-
-    renderer = _RENDERERS.get(template)
-    if renderer is None:
-        return f"Unknown template '{template}'. Available: {', '.join(TEMPLATES)}"
-    return renderer(ctx)
-
-
-def explain_all(
-    changes: List[Change],
-    old_version: Optional[str] = None,
-    new_version: Optional[str] = None,
-    api_name: Optional[str] = None,
-) -> Dict[str, str]:
-    """Generate all 7 template outputs at once."""
-    detail = classify_detailed(changes)
-    ctx = _build_context(detail, changes, old_version, new_version, api_name)
-    return {name: _RENDERERS[name](ctx) for name in TEMPLATES}
+def _version_label(old: Optional[str], new: Optional[str]) -> str:
+    if old and new:
+        return f"{old} -> {new}"
+    return ""
 
 
 # ── Internal context builder ──────────────────────────────────────────
@@ -90,12 +56,6 @@ def _build_context(
         "api_name": api_name or "API",
         "version_label": _version_label(old_version, new_version),
     }
-
-
-def _version_label(old: Optional[str], new: Optional[str]) -> str:
-    if old and new:
-        return f"{old} -> {new}"
-    return ""
 
 
 # ── Renderers ─────────────────────────────────────────────────────────
@@ -194,6 +154,55 @@ def _render_product(ctx: Dict) -> str:
     return "\n".join(lines)
 
 
+# ── Migration advice per change type ─────────────────────────────────
+
+def _migration_advice(change_type: str) -> str:
+    advice = {
+        "endpoint_removed": (
+            "**Action**: Update all clients to stop calling this endpoint. "
+            "If you control the consumers, search for references and remove them. "
+            "Consider using the new endpoint (if applicable) as a replacement."
+        ),
+        "method_removed": (
+            "**Action**: Update clients using this HTTP method. "
+            "Check if an alternative method is available on the same path."
+        ),
+        "required_param_added": (
+            "**Action**: All existing requests must now include this parameter. "
+            "Update every call site to pass the new required value."
+        ),
+        "param_removed": (
+            "**Action**: Remove this parameter from all requests. "
+            "Sending it may cause errors or be silently ignored."
+        ),
+        "response_removed": (
+            "**Action**: Update any client logic that depends on this response code. "
+            "Check what the new expected response is."
+        ),
+        "required_field_added": (
+            "**Action**: If this is a request body field, include it in all requests. "
+            "If this is a response field, update parsers to handle the new field."
+        ),
+        "field_removed": (
+            "**Action**: Remove any references to this field in your response parsers. "
+            "Accessing it will return undefined/null."
+        ),
+        "type_changed": (
+            "**Action**: Update serialization/deserialization logic for the new type. "
+            "Check all type assertions, validators, and database column types."
+        ),
+        "format_changed": (
+            "**Action**: Update parsing logic for the new format. "
+            "For example, if a date field changed from 'date' to 'date-time'."
+        ),
+        "enum_value_removed": (
+            "**Action**: Stop sending the removed enum value. "
+            "Update any switch/case or if/else blocks that handle it."
+        ),
+    }
+    return advice.get(change_type, "**Action**: Review the change and update your integration accordingly.")
+
+
 def _render_migration(ctx: Dict) -> str:
     lines: List[str] = []
     api = ctx["api_name"]
@@ -254,6 +263,35 @@ def _render_changelog(ctx: Dict) -> str:
         lines.append("")
 
     return "\n".join(lines)
+
+
+def _pr_severity(change_type: str) -> str:
+    """Map change type to severity emoji for PR comments."""
+    critical = {"endpoint_removed", "method_removed", "field_removed"}
+    high = {"required_param_added", "type_changed", "enum_value_removed"}
+    if change_type in critical:
+        return "🔴 Critical"
+    if change_type in high:
+        return "🟠 High"
+    return "🟡 Medium"
+
+
+def _pr_migration_hint(change: Dict) -> str:
+    """Generate a migration hint for a breaking change."""
+    ct = change.get("type", "")
+    if ct == "endpoint_removed":
+        return "Consumers must stop calling this endpoint. Consider a deprecation period."
+    if ct == "method_removed":
+        return "Consumers using this HTTP method must migrate to an alternative."
+    if ct == "required_param_added":
+        return "All existing consumers must include this parameter. Consider making it optional with a default."
+    if ct == "field_removed":
+        return "Consumers reading this field will break. Add it back or provide a migration path."
+    if ct == "type_changed":
+        return "Consumers expecting the old type will fail to parse. Coordinate the type migration."
+    if ct == "enum_value_removed":
+        return "Consumers using this value must update. Consider keeping it as deprecated."
+    return "Review this change and update consumers accordingly."
 
 
 def _render_pr_comment(ctx: Dict) -> str:
@@ -322,35 +360,6 @@ def _render_pr_comment(ctx: Dict) -> str:
     return "\n".join(lines)
 
 
-def _pr_severity(change_type: str) -> str:
-    """Map change type to severity emoji for PR comments."""
-    critical = {"endpoint_removed", "method_removed", "field_removed"}
-    high = {"required_param_added", "type_changed", "enum_value_removed"}
-    if change_type in critical:
-        return "🔴 Critical"
-    if change_type in high:
-        return "🟠 High"
-    return "🟡 Medium"
-
-
-def _pr_migration_hint(change: Dict) -> str:
-    """Generate a migration hint for a breaking change."""
-    ct = change.get("type", "")
-    if ct == "endpoint_removed":
-        return "Consumers must stop calling this endpoint. Consider a deprecation period."
-    if ct == "method_removed":
-        return "Consumers using this HTTP method must migrate to an alternative."
-    if ct == "required_param_added":
-        return "All existing consumers must include this parameter. Consider making it optional with a default."
-    if ct == "field_removed":
-        return "Consumers reading this field will break. Add it back or provide a migration path."
-    if ct == "type_changed":
-        return "Consumers expecting the old type will fail to parse. Coordinate the type migration."
-    if ct == "enum_value_removed":
-        return "Consumers using this value must update. Consider keeping it as deprecated."
-    return "Review this change and update consumers accordingly."
-
-
 def _render_slack(ctx: Dict) -> str:
     bump = ctx["bump"]
     api = ctx["api_name"]
@@ -376,55 +385,6 @@ def _render_slack(ctx: Dict) -> str:
     return "\n".join(lines)
 
 
-# ── Migration advice per change type ─────────────────────────────────
-
-def _migration_advice(change_type: str) -> str:
-    advice = {
-        "endpoint_removed": (
-            "**Action**: Update all clients to stop calling this endpoint. "
-            "If you control the consumers, search for references and remove them. "
-            "Consider using the new endpoint (if applicable) as a replacement."
-        ),
-        "method_removed": (
-            "**Action**: Update clients using this HTTP method. "
-            "Check if an alternative method is available on the same path."
-        ),
-        "required_param_added": (
-            "**Action**: All existing requests must now include this parameter. "
-            "Update every call site to pass the new required value."
-        ),
-        "param_removed": (
-            "**Action**: Remove this parameter from all requests. "
-            "Sending it may cause errors or be silently ignored."
-        ),
-        "response_removed": (
-            "**Action**: Update any client logic that depends on this response code. "
-            "Check what the new expected response is."
-        ),
-        "required_field_added": (
-            "**Action**: If this is a request body field, include it in all requests. "
-            "If this is a response field, update parsers to handle the new field."
-        ),
-        "field_removed": (
-            "**Action**: Remove any references to this field in your response parsers. "
-            "Accessing it will return undefined/null."
-        ),
-        "type_changed": (
-            "**Action**: Update serialization/deserialization logic for the new type. "
-            "Check all type assertions, validators, and database column types."
-        ),
-        "format_changed": (
-            "**Action**: Update parsing logic for the new format. "
-            "For example, if a date field changed from 'date' to 'date-time'."
-        ),
-        "enum_value_removed": (
-            "**Action**: Stop sending the removed enum value. "
-            "Update any switch/case or if/else blocks that handle it."
-        ),
-    }
-    return advice.get(change_type, "**Action**: Review the change and update your integration accordingly.")
-
-
 # ── Renderer registry ─────────────────────────────────────────────────
 
 _RENDERERS = {
@@ -436,3 +396,43 @@ _RENDERERS = {
     "pr_comment": _render_pr_comment,
     "slack": _render_slack,
 }
+
+
+def explain(
+    changes: List[Change],
+    template: str = "developer",
+    old_version: Optional[str] = None,
+    new_version: Optional[str] = None,
+    api_name: Optional[str] = None,
+) -> str:
+    """Generate a human-readable explanation of API changes.
+
+    Args:
+        changes: List of Change objects from the diff engine.
+        template: One of the 7 template names.
+        old_version: Previous API version (e.g. "1.0.0").
+        new_version: New API version (e.g. "2.0.0").
+        api_name: Optional API/service name for context.
+
+    Returns:
+        Formatted explanation string.
+    """
+    detail = classify_detailed(changes)
+    ctx = _build_context(detail, changes, old_version, new_version, api_name)
+
+    renderer = _RENDERERS.get(template)
+    if renderer is None:
+        return f"Unknown template '{template}'. Available: {', '.join(TEMPLATES)}"
+    return renderer(ctx)
+
+
+def explain_all(
+    changes: List[Change],
+    old_version: Optional[str] = None,
+    new_version: Optional[str] = None,
+    api_name: Optional[str] = None,
+) -> Dict[str, str]:
+    """Generate all 7 template outputs at once."""
+    detail = classify_detailed(changes)
+    ctx = _build_context(detail, changes, old_version, new_version, api_name)
+    return {name: _RENDERERS[name](ctx) for name in TEMPLATES}
