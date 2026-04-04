@@ -9,12 +9,6 @@ logger = logging.getLogger(__name__)
 class Gateway:
     """Main gateway implementing V10 architecture with advisor recommendations"""
     
-    def __init__(self, max_file_size: int = 10 * 1024 * 1024, timeout: int = 30):
-        self.registry = task_registry
-        self.max_file_size = max_file_size
-        self.timeout = timeout
-        self._load_tasks()
-    
     def _load_tasks(self):
         """Load all task modules to register handlers"""
         try:
@@ -23,6 +17,32 @@ class Gateway:
             import tasks.explain_diff
         except ImportError as e:
             logger.warning(f"Could not load all tasks: {e}")
+    
+    def __init__(self, max_file_size: int = 10 * 1024 * 1024, timeout: int = 30):
+        self.registry = task_registry
+        self.max_file_size = max_file_size
+        self.timeout = timeout
+        self._load_tasks()
+    
+    def _validate_file(self, file_path: str) -> bool:
+        """Validate file constraints"""
+        try:
+            import os
+            if not os.path.exists(file_path):
+                return False
+            file_size = os.path.getsize(file_path)
+            return file_size <= self.max_file_size
+        except:
+            return False
+    
+    def _error_response(self, code: str, message: str, **kwargs) -> Dict[str, Any]:
+        """Build standardized error response (Codex requirement #2)"""
+        return ErrorResponse(
+            code=code,
+            message=message,
+            details=kwargs.get("details"),
+            available_tasks=kwargs.get("available_tasks")
+        ).model_dump(mode='json')
     
     def run(self, task: str, files: List[str], **kwargs) -> Dict[str, Any]:
         """Main entry point - the single gateway function"""
@@ -99,26 +119,6 @@ class Gateway:
                 duration_ms=duration_ms,
                 correlation_id=request.correlation_id
             ).model_dump(mode='json')
-    
-    def _validate_file(self, file_path: str) -> bool:
-        """Validate file constraints"""
-        try:
-            import os
-            if not os.path.exists(file_path):
-                return False
-            file_size = os.path.getsize(file_path)
-            return file_size <= self.max_file_size
-        except:
-            return False
-    
-    def _error_response(self, code: str, message: str, **kwargs) -> Dict[str, Any]:
-        """Build standardized error response (Codex requirement #2)"""
-        return ErrorResponse(
-            code=code,
-            message=message,
-            details=kwargs.get("details"),
-            available_tasks=kwargs.get("available_tasks")
-        ).model_dump(mode='json')
 
 # Global gateway instance
 gateway = Gateway()
