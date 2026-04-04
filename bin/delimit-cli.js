@@ -2540,8 +2540,44 @@ program
                         console.log(chalk.gray('  Tip: point at a spec file: npx delimit-cli scan openapi.yaml'));
                     }
                 }
+                // Governance readiness checklist
+                const hasPolicy = fs.existsSync(path.join(target, '.delimit', 'policies.yml'));
+                const hasWorkflow = fs.existsSync(path.join(target, '.github', 'workflows', 'api-governance.yml'));
+                const hasGitHooks = fs.existsSync(path.join(target, '.git', 'hooks', 'pre-commit')) &&
+                    (() => { try { return fs.readFileSync(path.join(target, '.git', 'hooks', 'pre-commit'), 'utf-8').includes('delimit'); } catch { return false; } })();
+                const hasMcp = fs.existsSync(path.join(os.homedir(), '.mcp.json')) &&
+                    (() => { try { return fs.readFileSync(path.join(os.homedir(), '.mcp.json'), 'utf-8').includes('delimit'); } catch { return false; } })();
+                const hasSpecs = found.length > 0;
+
+                const checks = [
+                    { name: 'API spec', done: hasSpecs, fix: 'Add an openapi.yaml to your project' },
+                    { name: 'Policy', done: hasPolicy, fix: 'npx delimit-cli init' },
+                    { name: 'CI gate', done: hasWorkflow, fix: 'npx delimit-cli ci' },
+                    { name: 'Git hooks', done: hasGitHooks, fix: 'npx delimit-cli hooks install' },
+                    { name: 'MCP tools', done: hasMcp, fix: 'npx delimit-cli setup' },
+                ];
+                const score = checks.filter(c => c.done).length;
+
+                console.log(chalk.bold(`\n  Governance Readiness: ${score}/${checks.length}\n`));
+                for (const c of checks) {
+                    if (c.done) {
+                        console.log(`  ${chalk.green('●')} ${c.name}`);
+                    } else {
+                        console.log(`  ${chalk.gray('○')} ${c.name} ${chalk.gray('—')} ${chalk.yellow(c.fix)}`);
+                    }
+                }
+                console.log('');
+
                 // Interactive next step picker
                 try {
+                    // Pre-select the first missing item
+                    const firstMissing = checks.find(c => !c.done);
+                    const defaultChoice = firstMissing ?
+                        (firstMissing.name === 'Policy' ? 'init' :
+                         firstMissing.name === 'CI gate' ? 'ci' :
+                         firstMissing.name === 'Git hooks' ? 'hooks' :
+                         firstMissing.name === 'MCP tools' ? 'setup' : 'init') : 'exit';
+
                     const { next } = await inquirer.prompt([{
                         type: 'list',
                         name: 'next',
@@ -2549,15 +2585,19 @@ program
                         choices: [
                             { name: 'Set up governance for this project', value: 'init' },
                             { name: 'Add CI gate (GitHub Action)', value: 'ci' },
+                            { name: 'Install git hooks', value: 'hooks' },
                             { name: 'Configure AI assistants (Claude, Codex, Gemini)', value: 'setup' },
                             { name: 'Run a breaking change demo', value: 'try' },
                             { name: 'Exit', value: 'exit' },
                         ],
+                        default: defaultChoice,
                     }]);
                     if (next === 'init') {
                         execSync('npx delimit-cli init', { stdio: 'inherit' });
                     } else if (next === 'ci') {
                         execSync('npx delimit-cli ci', { stdio: 'inherit' });
+                    } else if (next === 'hooks') {
+                        execSync('npx delimit-cli hooks install', { stdio: 'inherit' });
                     } else if (next === 'setup') {
                         execSync('npx delimit-cli setup', { stdio: 'inherit' });
                     } else if (next === 'try') {
