@@ -30,8 +30,8 @@ Works across any configuration — from a single model on a budget to an enterpr
 ## Try it in 2 minutes
 
 ```bash
+npx delimit-cli scan     # Instant health grade for your API spec
 npx delimit-cli demo     # See governance in action — no setup needed
-npx delimit-cli init     # Set up governance for your project
 npx delimit-cli setup    # Configure your AI assistants
 ```
 
@@ -142,6 +142,7 @@ That's it. Delimit auto-fetches the base branch spec, diffs it, and posts a PR c
 ## CLI commands
 
 ```bash
+npx delimit-cli scan                             # Instant spec health grade + recommendations
 npx delimit-cli quickstart                       # Clone demo project + guided walkthrough
 npx delimit-cli try                              # Zero-risk demo — saves governance report
 npx delimit-cli demo                             # Self-contained governance demo
