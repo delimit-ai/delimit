@@ -64,34 +64,6 @@ class ComplexityAnalyzer:
             (100, "Enterprise-scale API")
         ]
     
-    def analyze_openapi_complexity(self, spec: Union[str, Dict, Path]) -> Dict[str, Any]:
-        """
-        Analyze OpenAPI specification complexity.
-        
-        Args:
-            spec: OpenAPI specification as string, dict, or file path
-            
-        Returns:
-            Dictionary with score, classification, and metrics
-        """
-        # Parse specification if needed
-        parsed_spec = self._parse_spec(spec)
-        
-        # Extract metrics
-        metrics = self._extract_metrics(parsed_spec)
-        
-        # Calculate score
-        score = self._calculate_score(metrics)
-        
-        # Determine classification
-        classification = self._classify_complexity(score)
-        
-        return {
-            "score": score,
-            "classification": classification,
-            "metrics": metrics
-        }
-    
     def _parse_spec(self, spec: Union[str, Dict, Path]) -> Dict:
         """Parse OpenAPI specification from various input formats."""
         if isinstance(spec, dict):
@@ -118,19 +90,6 @@ class ComplexityAnalyzer:
                             return yaml.safe_load(content)
         
         raise ValueError("Unable to parse OpenAPI specification")
-    
-    def _extract_metrics(self, spec: Dict) -> Dict[str, int]:
-        """Extract complexity metrics from OpenAPI specification."""
-        metrics = {
-            'endpoint_count': self._count_endpoints(spec),
-            'schema_count': self._count_schemas(spec),
-            'parameter_count': self._count_parameters(spec),
-            'response_variants': self._count_response_variants(spec),
-            'nested_schema_depth': self._calculate_max_schema_depth(spec),
-            'security_schemes': self._count_security_schemes(spec),
-            'example_count': self._count_examples(spec)
-        }
-        return metrics
     
     def _count_endpoints(self, spec: Dict) -> int:
         """Count total HTTP methods across all paths."""
@@ -194,19 +153,6 @@ class ComplexityAnalyzer:
         
         return len(status_codes)
     
-    def _calculate_max_schema_depth(self, spec: Dict) -> int:
-        """Calculate maximum nested depth of JSON schema objects."""
-        max_depth = 0
-        components = spec.get('components', {})
-        schemas = components.get('schemas', {})
-        
-        for schema_name, schema in schemas.items():
-            if isinstance(schema, dict):
-                depth = self._get_schema_depth(schema, schemas)
-                max_depth = max(max_depth, depth)
-        
-        return max_depth
-    
     def _get_schema_depth(self, schema: Dict, all_schemas: Dict, visited: Optional[set] = None) -> int:
         """Recursively calculate schema depth."""
         if visited is None:
@@ -263,6 +209,19 @@ class ComplexityAnalyzer:
         
         return depth
     
+    def _calculate_max_schema_depth(self, spec: Dict) -> int:
+        """Calculate maximum nested depth of JSON schema objects."""
+        max_depth = 0
+        components = spec.get('components', {})
+        schemas = components.get('schemas', {})
+        
+        for schema_name, schema in schemas.items():
+            if isinstance(schema, dict):
+                depth = self._get_schema_depth(schema, schemas)
+                max_depth = max(max_depth, depth)
+        
+        return max_depth
+    
     def _count_security_schemes(self, spec: Dict) -> int:
         """Count number of defined authentication methods."""
         components = spec.get('components', {})
@@ -311,6 +270,19 @@ class ComplexityAnalyzer:
         
         return count
     
+    def _extract_metrics(self, spec: Dict) -> Dict[str, int]:
+        """Extract complexity metrics from OpenAPI specification."""
+        metrics = {
+            'endpoint_count': self._count_endpoints(spec),
+            'schema_count': self._count_schemas(spec),
+            'parameter_count': self._count_parameters(spec),
+            'response_variants': self._count_response_variants(spec),
+            'nested_schema_depth': self._calculate_max_schema_depth(spec),
+            'security_schemes': self._count_security_schemes(spec),
+            'example_count': self._count_examples(spec)
+        }
+        return metrics
+    
     def _calculate_score(self, metrics: Dict[str, int]) -> int:
         """Calculate complexity score based on metrics."""
         total_score = 0
@@ -332,6 +304,34 @@ class ComplexityAnalyzer:
             if score <= threshold:
                 return classification
         return "Enterprise-scale API"
+    
+    def analyze_openapi_complexity(self, spec: Union[str, Dict, Path]) -> Dict[str, Any]:
+        """
+        Analyze OpenAPI specification complexity.
+        
+        Args:
+            spec: OpenAPI specification as string, dict, or file path
+            
+        Returns:
+            Dictionary with score, classification, and metrics
+        """
+        # Parse specification if needed
+        parsed_spec = self._parse_spec(spec)
+        
+        # Extract metrics
+        metrics = self._extract_metrics(parsed_spec)
+        
+        # Calculate score
+        score = self._calculate_score(metrics)
+        
+        # Determine classification
+        classification = self._classify_complexity(score)
+        
+        return {
+            "score": score,
+            "classification": classification,
+            "metrics": metrics
+        }
     
     def format_ci_output(self, analysis: Dict[str, Any]) -> Optional[str]:
         """
