@@ -6,6 +6,48 @@ from schemas.base import TaskRequest
 
 register_task = task_registry.register
 
+def load_spec(file_path: str) -> Dict:
+    """Load API specification from YAML or JSON"""
+    with open(file_path, 'r') as f:
+        if file_path.endswith('.yaml') or file_path.endswith('.yml'):
+            return yaml.safe_load(f)
+        elif file_path.endswith('.json'):
+            return json.load(f)
+        else:
+            # Try YAML first, then JSON
+            content = f.read()
+            try:
+                return yaml.safe_load(content)
+            except:
+                return json.loads(content)
+
+def calculate_risk_score(breaking_changes: List[Dict]) -> int:
+    """Calculate risk score based on breaking changes"""
+    if not breaking_changes:
+        return 0
+    
+    score = 0
+    for change in breaking_changes:
+        if change["severity"] == "high":
+            score += 10
+        elif change["severity"] == "medium":
+            score += 5
+        else:
+            score += 1
+    
+    return min(score, 100)
+
+def get_risk_level(score: int) -> str:
+    """Convert risk score to level"""
+    if score == 0:
+        return "none"
+    elif score < 20:
+        return "low"
+    elif score < 50:
+        return "medium"
+    else:
+        return "high"
+
 @register_task("validate-api", version="v1", description="Validate API for breaking changes")
 def validate_api_handler(request: TaskRequest) -> Dict[str, Any]:
     """Check API specifications for breaking changes"""
@@ -87,45 +129,3 @@ def validate_api_handler(request: TaskRequest) -> Dict[str, Any]:
             "required_params_added": len([c for c in breaking_changes if c["type"] == "required_parameter_added"])
         }
     }
-
-def load_spec(file_path: str) -> Dict:
-    """Load API specification from YAML or JSON"""
-    with open(file_path, 'r') as f:
-        if file_path.endswith('.yaml') or file_path.endswith('.yml'):
-            return yaml.safe_load(f)
-        elif file_path.endswith('.json'):
-            return json.load(f)
-        else:
-            # Try YAML first, then JSON
-            content = f.read()
-            try:
-                return yaml.safe_load(content)
-            except:
-                return json.loads(content)
-
-def calculate_risk_score(breaking_changes: List[Dict]) -> int:
-    """Calculate risk score based on breaking changes"""
-    if not breaking_changes:
-        return 0
-    
-    score = 0
-    for change in breaking_changes:
-        if change["severity"] == "high":
-            score += 10
-        elif change["severity"] == "medium":
-            score += 5
-        else:
-            score += 1
-    
-    return min(score, 100)
-
-def get_risk_level(score: int) -> str:
-    """Convert risk score to level"""
-    if score == 0:
-        return "none"
-    elif score < 20:
-        return "low"
-    elif score < 50:
-        return "medium"
-    else:
-        return "high"
