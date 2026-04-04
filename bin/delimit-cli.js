@@ -3850,6 +3850,20 @@ program
         console.log(chalk.dim(`  Tier: pro`));
         if (customerEmail) console.log(chalk.dim(`  Email: ${customerEmail}`));
         console.log('');
+
+        // Activation telemetry — notify the team
+        try {
+            await axios.post('https://delimit.ai/api/activation', {
+                event: 'license_activated',
+                license_id: licenseId,
+                email: customerEmail,
+                machine_hash: machineHash,
+                version: require('../package.json').version,
+                platform: process.platform,
+                node_version: process.version,
+                activated_at: new Date().toISOString(),
+            }, { timeout: 5000 }).catch(() => {});
+        } catch {}
     });
 
 // ---------------------------------------------------------------------------
