@@ -1914,12 +1914,16 @@ jobs:
         console.log(chalk.bold(`\n  Setup complete in ${elapsed}s`));
         console.log(chalk.gray(`  Evidence saved to .delimit/evidence/\n`));
         console.log('  Next steps:');
+        console.log(`    ${chalk.bold('npx delimit-cli check')}                          — pre-commit governance check`);
         if (specPath) {
             console.log(`    ${chalk.bold('npx delimit-cli lint')} ${specPath} ${specPath}  — lint on every PR`);
         } else if (['fastapi', 'nestjs', 'express'].includes(framework)) {
             console.log(`    ${chalk.bold('npx delimit-cli lint')}                           — zero-spec mode (${frameworkLabel})`);
         } else {
             console.log(`    ${chalk.bold('npx delimit-cli lint')}                           — add an OpenAPI spec first`);
+        }
+        if (ciProvider === 'none') {
+            console.log(`    ${chalk.bold('npx delimit-cli ci')}                             — generate GitHub Action workflow`);
         }
         console.log(`    ${chalk.bold('delimit doctor')}                         — verify setup`);
         console.log(`    ${chalk.bold('delimit explain')}                        — human-readable report`);
@@ -1932,7 +1936,7 @@ jobs:
         if (foundSpecs.length > 1) {
             console.log(`    ${chalk.gray('Review all ' + foundSpecs.length + ' specs')}                       — multiple specs detected`);
         }
-        if (ciProvider === 'none') {
+        if (ciProvider === 'none' && !specPath) {
             console.log(`    ${chalk.gray('Add CI')}                                 — no CI detected; consider GitHub Actions`);
         }
 
@@ -3037,6 +3041,170 @@ program
             console.log(chalk.yellow.bold(`  ${ok} passed, ${warn} warning(s). Setup looks good.\n`));
         } else {
             console.log(chalk.red.bold(`  ${ok} passed, ${warn} warning(s), ${fail} error(s). Fix errors above.\n`));
+        }
+    });
+
+// Check command — pre-commit/pre-push governance check
+program
+    .command('check')
+    .description('Run a local governance check on staged or modified API specs')
+    .option('--base <ref>', 'Git ref to compare against (default: HEAD)')
+    .option('--staged', 'Only check staged files')
+    .option('--fix', 'Show migration guidance for violations')
+    .action(async (opts) => {
+        const startTime = Date.now();
+        const projectDir = process.cwd();
+        const configDir = path.join(projectDir, '.delimit');
+        const policyFile = path.join(configDir, 'policies.yml');
+
+        console.log(chalk.bold('\n  Delimit Check\n'));
+
+        // Verify governance is initialized
+        if (!fs.existsSync(policyFile)) {
+            console.log(chalk.yellow('  No governance setup found. Run:'));
+            console.log(chalk.bold('    npx delimit-cli init\n'));
+            process.exitCode = 1;
+            return;
+        }
+
+        // Load policy preset
+        let preset = 'default';
+        try {
+            const policyContent = fs.readFileSync(policyFile, 'utf-8');
+            if (policyContent.includes('action: forbid') && !policyContent.includes('action: warn')) preset = 'strict';
+            else if (!policyContent.includes('action: forbid') && policyContent.includes('action: warn')) preset = 'relaxed';
+        } catch {}
+
+        // Find changed spec files via git
+        const base = opts.base || 'HEAD';
+        let changedFiles = [];
+        try {
+            const gitCmd = opts.staged
+                ? 'git diff --cached --name-only'
+                : `git diff --name-only ${base}`;
+            const output = execSync(gitCmd, { cwd: projectDir, encoding: 'utf-8', timeout: 5000 }).trim();
+            if (output) changedFiles = output.split('\n');
+        } catch {
+            // Not a git repo or no changes — fall back to scanning all specs
+        }
+
+        // Filter to spec files
+        const specExtensions = ['.yaml', '.yml', '.json'];
+        const specKeywords = ['openapi', 'swagger', 'api-spec', 'api_spec', 'api.'];
+        let specFiles = changedFiles.filter(f => {
+            const ext = path.extname(f).toLowerCase();
+            const name = path.basename(f).toLowerCase();
+            if (!specExtensions.includes(ext)) return false;
+            if (specKeywords.some(kw => name.includes(kw))) return true;
+            // Peek inside to confirm it's a spec
+            try {
+                const head = fs.readFileSync(path.join(projectDir, f), 'utf-8').slice(0, 512);
+                return head.includes('"openapi"') || head.includes('openapi:') || head.includes('"swagger"') || head.includes('swagger:');
+            } catch { return false; }
+        });
+
+        // If no changed specs found, scan all known specs
+        if (specFiles.length === 0) {
+            const candidates = [
+                'api/openapi.yaml', 'api/openapi.yml', 'api/openapi.json',
+                'openapi.yaml', 'openapi.yml', 'openapi.json',
+                'swagger.yaml', 'swagger.yml', 'swagger.json',
+                'spec/api.json', 'spec/openapi.yaml', 'docs/openapi.yaml',
+            ];
+            specFiles = candidates.filter(c => fs.existsSync(path.join(projectDir, c)));
+        }
+
+        if (specFiles.length === 0) {
+            console.log(chalk.gray('  No API spec files found or changed.'));
+            console.log(chalk.gray('  Point at a spec: npx delimit-cli check --base main\n'));
+            return;
+        }
+
+        console.log(chalk.gray(`  Policy: ${preset} | Base: ${base} | Specs: ${specFiles.length}\n`));
+
+        let totalBreaking = 0;
+        let totalWarnings = 0;
+        let totalViolations = [];
+        let allPassed = true;
+
+        for (const specFile of specFiles) {
+            const fullPath = path.join(projectDir, specFile);
+
+            // Get the base version from git
+            let baseContent = null;
+            try {
+                baseContent = execSync(`git show ${base}:${specFile}`, {
+                    cwd: projectDir, encoding: 'utf-8', timeout: 5000
+                });
+            } catch {
+                // File is new — no base version to compare
+                console.log(`  ${chalk.green('+')} ${specFile} ${chalk.gray('(new file — no base to compare)')}`);
+                continue;
+            }
+
+            // Write base version to temp file for comparison
+            const tmpBase = path.join(os.tmpdir(), `delimit-check-base-${Date.now()}.yaml`);
+            try {
+                fs.writeFileSync(tmpBase, baseContent);
+                const result = apiEngine.lint(tmpBase, fullPath, { policy: preset });
+
+                if (result && result.summary) {
+                    const breaking = result.summary.breaking || result.summary.breaking_changes || 0;
+                    const warnings = result.summary.warnings || 0;
+                    const violations = result.violations || [];
+
+                    totalBreaking += breaking;
+                    totalWarnings += warnings;
+                    totalViolations.push(...violations);
+
+                    if (breaking > 0) {
+                        allPassed = false;
+                        console.log(`  ${chalk.red('X')} ${specFile} ${chalk.red(`— ${breaking} breaking, ${warnings} warning(s)`)}`);
+                        if (opts.fix) {
+                            for (const v of violations) {
+                                const icon = v.severity === 'error' ? chalk.red('  BLOCK') : chalk.yellow('  WARN ');
+                                console.log(`    ${icon} ${v.message}`);
+                                if (v.path) console.log(chalk.gray(`           ${v.path}`));
+                            }
+                        }
+                    } else if (warnings > 0) {
+                        console.log(`  ${chalk.yellow('~')} ${specFile} ${chalk.yellow(`— ${warnings} warning(s)`)}`);
+                    } else {
+                        console.log(`  ${chalk.green('+')} ${specFile} ${chalk.green('— clean')}`);
+                    }
+
+                    // Show semver bump
+                    if (result.semver && result.semver.bump && result.semver.bump !== 'none') {
+                        const bump = result.semver.bump.toUpperCase();
+                        const bumpColor = bump === 'MAJOR' ? chalk.red : bump === 'MINOR' ? chalk.yellow : chalk.green;
+                        console.log(`    ${chalk.gray('Semver:')} ${bumpColor(bump)}`);
+                    }
+                } else {
+                    console.log(`  ${chalk.green('+')} ${specFile} ${chalk.green('— clean')}`);
+                }
+            } catch (err) {
+                console.log(`  ${chalk.green('+')} ${specFile} ${chalk.green('— clean')}`);
+            } finally {
+                try { fs.unlinkSync(tmpBase); } catch {}
+            }
+        }
+
+        // Summary
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        console.log('');
+        if (totalBreaking > 0) {
+            console.log(chalk.red.bold(`  BLOCKED — ${totalBreaking} breaking change(s) across ${specFiles.length} spec(s)`));
+            if (!opts.fix) {
+                console.log(chalk.gray('  Run with --fix to see migration guidance'));
+            }
+            console.log(chalk.gray(`  ${elapsed}s\n`));
+            process.exitCode = 1;
+        } else if (totalWarnings > 0) {
+            console.log(chalk.yellow.bold(`  PASSED with ${totalWarnings} warning(s)`));
+            console.log(chalk.gray(`  ${elapsed}s\n`));
+        } else {
+            console.log(chalk.green.bold('  PASSED — no breaking changes'));
+            console.log(chalk.gray(`  ${elapsed}s\n`));
         }
     });
 
