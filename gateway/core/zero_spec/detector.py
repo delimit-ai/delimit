@@ -36,59 +36,23 @@ class FrameworkInfo:
     message: str = ""
 
 
-def detect_framework(project_dir: str = ".") -> FrameworkInfo:
-    """
-    Detect which API framework a project uses.
-
-    Checks dependency files first (high confidence), then scans source
-    files for framework imports (medium confidence).
-    """
-    root = Path(project_dir)
-
-    # Check Python dependency files for FastAPI
-    fastapi_confidence = _check_python_deps(root, "fastapi")
-    if fastapi_confidence > 0:
-        apps = _find_fastapi_apps(root)
-        entry = apps[0].file if apps else None
-        return FrameworkInfo(
-            framework=Framework.FASTAPI,
-            confidence=fastapi_confidence,
-            app_locations=apps,
-            entry_point=entry,
-            message=f"FastAPI detected{f' in {entry}' if entry else ''}",
-        )
-
-    # Check Node dependency files for NestJS (before Express since NestJS uses Express internally)
-    nestjs_confidence = _check_node_deps(root, "@nestjs/core")
-    if nestjs_confidence > 0:
-        apps = _find_nestjs_apps(root)
-        entry = apps[0].file if apps else None
-        return FrameworkInfo(
-            framework=Framework.NESTJS,
-            confidence=nestjs_confidence,
-            app_locations=apps,
-            entry_point=entry,
-            message=f"NestJS detected{f' in {entry}' if entry else ''}",
-        )
-
-    # Check Node dependency files for Express
-    express_confidence = _check_node_deps(root, "express")
-    if express_confidence > 0:
-        apps = _find_express_apps(root)
-        entry = apps[0].file if apps else None
-        return FrameworkInfo(
-            framework=Framework.EXPRESS,
-            confidence=express_confidence,
-            app_locations=apps,
-            entry_point=entry,
-            message=f"Express detected{f' in {entry}' if entry else ''}",
-        )
-
-    return FrameworkInfo(
-        framework=Framework.UNKNOWN,
-        confidence=0.0,
-        message="No supported API framework detected",
-    )
+def _iter_python_files(root: Path, max_files: int = 100) -> List[Path]:
+    """Iterate Python files, skipping venvs and hidden dirs."""
+    skip_dirs = {
+        "venv", ".venv", "env", ".env", "node_modules",
+        "__pycache__", ".git", ".tox", ".mypy_cache", ".pytest_cache",
+        "dist", "build", "egg-info",
+    }
+    count = 0
+    files = []
+    for path in root.rglob("*.py"):
+        if any(part in skip_dirs for part in path.parts):
+            continue
+        files.append(path)
+        count += 1
+        if count >= max_files:
+            break
+    return files
 
 
 def _check_python_deps(root: Path, package: str) -> float:
@@ -152,6 +116,43 @@ def _check_node_deps(root: Path, package: str) -> float:
     return 0.0
 
 
+def _scan_file_for_express(path: Path, root: Path) -> List[AppLocation]:
+    """Scan a single JS/TS file for Express app instantiation."""
+    results = []
+    try:
+        source = path.read_text()
+    except Exception:
+        return results
+
+    # Must import express
+    if not re.search(r"require\s*\(\s*['\"]express['\"]\s*\)", source) and \
+       not re.search(r"from\s+['\"]express['\"]", source):
+        return results
+
+    # Find the express variable name
+    express_var = None
+    m_req = re.search(r"(?:const|let|var)\s+(\w+)\s*=\s*require\s*\(\s*['\"]express['\"]\s*\)", source)
+    if m_req:
+        express_var = m_req.group(1)
+
+    if not express_var:
+        return results
+
+    # Find app = express()
+    m_app = re.search(
+        rf"(?:const|let|var)\s+(\w+)\s*=\s*{re.escape(express_var)}\s*\(\s*\)",
+        source,
+    )
+    if m_app:
+        var_name = m_app.group(1)
+        # Determine the line number
+        line_num = source[:m_app.start()].count("\n") + 1
+        rel_path = str(path.relative_to(root))
+        results.append(AppLocation(file=rel_path, variable=var_name, line=line_num))
+
+    return results
+
+
 def _find_express_apps(root: Path) -> List[AppLocation]:
     """Find Express app instances via regex scanning of JS/TS files."""
     apps = []
@@ -194,43 +195,6 @@ def _find_express_apps(root: Path) -> List[AppLocation]:
     return apps
 
 
-def _scan_file_for_express(path: Path, root: Path) -> List[AppLocation]:
-    """Scan a single JS/TS file for Express app instantiation."""
-    results = []
-    try:
-        source = path.read_text()
-    except Exception:
-        return results
-
-    # Must import express
-    if not re.search(r"require\s*\(\s*['\"]express['\"]\s*\)", source) and \
-       not re.search(r"from\s+['\"]express['\"]", source):
-        return results
-
-    # Find the express variable name
-    express_var = None
-    m_req = re.search(r"(?:const|let|var)\s+(\w+)\s*=\s*require\s*\(\s*['\"]express['\"]\s*\)", source)
-    if m_req:
-        express_var = m_req.group(1)
-
-    if not express_var:
-        return results
-
-    # Find app = express()
-    m_app = re.search(
-        rf"(?:const|let|var)\s+(\w+)\s*=\s*{re.escape(express_var)}\s*\(\s*\)",
-        source,
-    )
-    if m_app:
-        var_name = m_app.group(1)
-        # Determine the line number
-        line_num = source[:m_app.start()].count("\n") + 1
-        rel_path = str(path.relative_to(root))
-        results.append(AppLocation(file=rel_path, variable=var_name, line=line_num))
-
-    return results
-
-
 def _find_nestjs_apps(root: Path) -> List[AppLocation]:
     """Find NestJS AppModule files."""
     apps = []
@@ -248,32 +212,13 @@ def _find_nestjs_apps(root: Path) -> List[AppLocation]:
     return apps
 
 
-def _find_fastapi_apps(root: Path) -> List[AppLocation]:
-    """Find FastAPI app instances via AST analysis."""
-    apps = []
-
-    # Check common entry points first
-    priority_files = ["main.py", "app.py", "app/main.py", "src/main.py", "src/app.py", "server.py"]
-    checked = set()
-
-    for rel in priority_files:
-        path = root / rel
-        if path.exists():
-            checked.add(path)
-            found = _scan_file_for_fastapi(path, root)
-            apps.extend(found)
-
-    # If not found in priority files, scan all .py files
-    if not apps:
-        for py_file in _iter_python_files(root, max_files=100):
-            if py_file in checked:
-                continue
-            found = _scan_file_for_fastapi(py_file, root)
-            apps.extend(found)
-            if apps:
-                break
-
-    return apps
+def _get_call_name(call: ast.Call) -> str:
+    """Extract function name from an ast.Call node."""
+    if isinstance(call.func, ast.Name):
+        return call.func.id
+    if isinstance(call.func, ast.Attribute):
+        return call.func.attr
+    return ""
 
 
 def _scan_file_for_fastapi(path: Path, root: Path) -> List[AppLocation]:
@@ -325,29 +270,84 @@ def _scan_file_for_fastapi(path: Path, root: Path) -> List[AppLocation]:
     return results
 
 
-def _get_call_name(call: ast.Call) -> str:
-    """Extract function name from an ast.Call node."""
-    if isinstance(call.func, ast.Name):
-        return call.func.id
-    if isinstance(call.func, ast.Attribute):
-        return call.func.attr
-    return ""
+def _find_fastapi_apps(root: Path) -> List[AppLocation]:
+    """Find FastAPI app instances via AST analysis."""
+    apps = []
+
+    # Check common entry points first
+    priority_files = ["main.py", "app.py", "app/main.py", "src/main.py", "src/app.py", "server.py"]
+    checked = set()
+
+    for rel in priority_files:
+        path = root / rel
+        if path.exists():
+            checked.add(path)
+            found = _scan_file_for_fastapi(path, root)
+            apps.extend(found)
+
+    # If not found in priority files, scan all .py files
+    if not apps:
+        for py_file in _iter_python_files(root, max_files=100):
+            if py_file in checked:
+                continue
+            found = _scan_file_for_fastapi(py_file, root)
+            apps.extend(found)
+            if apps:
+                break
+
+    return apps
 
 
-def _iter_python_files(root: Path, max_files: int = 100) -> List[Path]:
-    """Iterate Python files, skipping venvs and hidden dirs."""
-    skip_dirs = {
-        "venv", ".venv", "env", ".env", "node_modules",
-        "__pycache__", ".git", ".tox", ".mypy_cache", ".pytest_cache",
-        "dist", "build", "egg-info",
-    }
-    count = 0
-    files = []
-    for path in root.rglob("*.py"):
-        if any(part in skip_dirs for part in path.parts):
-            continue
-        files.append(path)
-        count += 1
-        if count >= max_files:
-            break
-    return files
+def detect_framework(project_dir: str = ".") -> FrameworkInfo:
+    """
+    Detect which API framework a project uses.
+
+    Checks dependency files first (high confidence), then scans source
+    files for framework imports (medium confidence).
+    """
+    root = Path(project_dir)
+
+    # Check Python dependency files for FastAPI
+    fastapi_confidence = _check_python_deps(root, "fastapi")
+    if fastapi_confidence > 0:
+        apps = _find_fastapi_apps(root)
+        entry = apps[0].file if apps else None
+        return FrameworkInfo(
+            framework=Framework.FASTAPI,
+            confidence=fastapi_confidence,
+            app_locations=apps,
+            entry_point=entry,
+            message=f"FastAPI detected{f' in {entry}' if entry else ''}",
+        )
+
+    # Check Node dependency files for NestJS (before Express since NestJS uses Express internally)
+    nestjs_confidence = _check_node_deps(root, "@nestjs/core")
+    if nestjs_confidence > 0:
+        apps = _find_nestjs_apps(root)
+        entry = apps[0].file if apps else None
+        return FrameworkInfo(
+            framework=Framework.NESTJS,
+            confidence=nestjs_confidence,
+            app_locations=apps,
+            entry_point=entry,
+            message=f"NestJS detected{f' in {entry}' if entry else ''}",
+        )
+
+    # Check Node dependency files for Express
+    express_confidence = _check_node_deps(root, "express")
+    if express_confidence > 0:
+        apps = _find_express_apps(root)
+        entry = apps[0].file if apps else None
+        return FrameworkInfo(
+            framework=Framework.EXPRESS,
+            confidence=express_confidence,
+            app_locations=apps,
+            entry_point=entry,
+            message=f"Express detected{f' in {entry}' if entry else ''}",
+        )
+
+    return FrameworkInfo(
+        framework=Framework.UNKNOWN,
+        confidence=0.0,
+        message="No supported API framework detected",
+    )
