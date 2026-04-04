@@ -53,6 +53,33 @@ def _append_audit(entry: Dict[str, Any]):
         f.write(json.dumps(entry) + "\n")
 
 
+def _build_agent_prompt(task: Dict[str, Any]) -> str:
+    """Build a structured prompt for a subagent to execute the task."""
+    lines = [
+        f"## Agent Task: {task['id']}",
+        f"**Title:** {task['title']}",
+    ]
+    if task.get("description"):
+        lines.append(f"**Description:** {task['description']}")
+    lines.append(f"**Priority:** {task['priority']}")
+    lines.append(f"**Assignee:** {task['assignee']}")
+
+    if task.get("context"):
+        lines.append(f"\n**Context:**\n{task['context']}")
+
+    if task.get("tools_needed"):
+        lines.append(f"\n**Tools needed:** {', '.join(task['tools_needed'])}")
+
+    if task.get("constraints"):
+        lines.append(f"\n**Constraints:**")
+        for c in task["constraints"]:
+            lines.append(f"- {c}")
+
+    lines.append(f"\n**When done:** Call `delimit_agent_complete` with task_id='{task['id']}' and your result.")
+
+    return "\n".join(lines)
+
+
 def dispatch_task(
     title: str,
     description: str = "",
@@ -121,50 +148,6 @@ def dispatch_task(
     }
 
 
-def _build_agent_prompt(task: Dict[str, Any]) -> str:
-    """Build a structured prompt for a subagent to execute the task."""
-    lines = [
-        f"## Agent Task: {task['id']}",
-        f"**Title:** {task['title']}",
-    ]
-    if task.get("description"):
-        lines.append(f"**Description:** {task['description']}")
-    lines.append(f"**Priority:** {task['priority']}")
-    lines.append(f"**Assignee:** {task['assignee']}")
-
-    if task.get("context"):
-        lines.append(f"\n**Context:**\n{task['context']}")
-
-    if task.get("tools_needed"):
-        lines.append(f"\n**Tools needed:** {', '.join(task['tools_needed'])}")
-
-    if task.get("constraints"):
-        lines.append(f"\n**Constraints:**")
-        for c in task["constraints"]:
-            lines.append(f"- {c}")
-
-    lines.append(f"\n**When done:** Call `delimit_agent_complete` with task_id='{task['id']}' and your result.")
-
-    return "\n".join(lines)
-
-
-def get_agent_status(task_id: str = "") -> Dict[str, Any]:
-    """Get the status of a specific task, or list all active tasks."""
-    tasks = _load_tasks()
-
-    if not task_id or not task_id.strip():
-        return list_active_agents()
-
-    task_id = task_id.strip().upper()
-    if task_id not in tasks:
-        return {"error": f"Task {task_id} not found"}
-
-    return {
-        "status": "ok",
-        "task": tasks[task_id],
-    }
-
-
 def list_active_agents() -> Dict[str, Any]:
     """Return all tasks that are not done or failed."""
     tasks = _load_tasks()
@@ -187,6 +170,23 @@ def list_active_agents() -> Dict[str, Any]:
              "assignee": t["assignee"], "priority": t["priority"]}
             for t in active.values()
         ],
+    }
+
+
+def get_agent_status(task_id: str = "") -> Dict[str, Any]:
+    """Get the status of a specific task, or list all active tasks."""
+    tasks = _load_tasks()
+
+    if not task_id or not task_id.strip():
+        return list_active_agents()
+
+    task_id = task_id.strip().upper()
+    if task_id not in tasks:
+        return {"error": f"Task {task_id} not found"}
+
+    return {
+        "status": "ok",
+        "task": tasks[task_id],
     }
 
 
