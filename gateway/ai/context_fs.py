@@ -30,6 +30,16 @@ def init_context(venture: str = "default") -> dict:
     return {"initialized": venture, "path": str(ctx_dir)}
 
 
+def _bump_version(venture: str):
+    """Increment the version counter in the venture manifest."""
+    manifest_path = CONTEXT_ROOT / venture / "manifest.json"
+    if manifest_path.exists():
+        m = json.loads(manifest_path.read_text())
+        m["version"] = m.get("version", 0) + 1
+        m["updated_at"] = datetime.now(timezone.utc).isoformat()
+        manifest_path.write_text(json.dumps(m))
+
+
 def write_artifact(venture: str, name: str, content: str, artifact_type: str = "text") -> dict:
     """Write an artifact to the context filesystem."""
     ctx_dir = CONTEXT_ROOT / venture / "artifacts"
@@ -181,13 +191,3 @@ def merge_branch(venture: str, branch_name: str) -> dict:
     shutil.rmtree(branch_dir)
     _bump_version(venture)
     return {"merged": branch_name, "files": merged_files}
-
-
-def _bump_version(venture: str):
-    """Increment the version counter in the venture manifest."""
-    manifest_path = CONTEXT_ROOT / venture / "manifest.json"
-    if manifest_path.exists():
-        m = json.loads(manifest_path.read_text())
-        m["version"] = m.get("version", 0) + 1
-        m["updated_at"] = datetime.now(timezone.utc).isoformat()
-        manifest_path.write_text(json.dumps(m))
