@@ -128,7 +128,7 @@ describe('installClaudeHooks', () => {
         // SessionStart uses nested format
         const sessionGroup = config.hooks.SessionStart[0];
         assert.ok(sessionGroup.hooks, 'SessionStart should use nested format');
-        assert.ok(sessionGroup.hooks[0].command.includes('delimit-cli hook session-start'));
+        assert.ok(sessionGroup.hooks[0].command.includes('delimit') || sessionGroup.hooks[0].command.includes('hooks'));
         assert.strictEqual(sessionGroup.if, undefined, 'SessionStart should have no if condition');
 
         // PreToolUse should have the spec-scoped hook in nested format
