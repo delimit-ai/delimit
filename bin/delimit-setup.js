@@ -708,6 +708,11 @@ WHITE='\\033[97m'; BOLD='\\033[1m'; DIM='\\033[2m'; RESET='\\033[0m'
 # Fix config permissions before anything else
 [ -f "$HOME/.codex/config.toml" ] && chmod 644 "$HOME/.codex/config.toml" 2>/dev/null
 if [ "$DELIMIT_WRAPPED" = "true" ] || [ ! -t 1 ]; then
+    # Check for renamed binary first (avoids infinite loop when shim IS at /usr/bin/tool)
+    for c in /usr/bin/${toolName}-real /usr/local/bin/${toolName}-real $HOME/.local/bin/${toolName}-real; do
+        [ -x "$c" ] && exec "$c" "$@"
+    done
+    DELIMIT_WRAPPED=true; export DELIMIT_WRAPPED
     for c in /usr/bin/${toolName} /usr/local/bin/${toolName} $HOME/.local/bin/${toolName}; do
         [ -x "$c" ] && exec "$c" "$@"
     done
