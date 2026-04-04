@@ -400,6 +400,49 @@ def list_ventures() -> Dict[str, Any]:
         return {"ventures": {}, "count": 0}
 
 
+def _parse_ts(ts_str: str) -> float:
+    """Parse ISO timestamp to epoch seconds."""
+    try:
+        import datetime
+        dt = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        return dt.timestamp()
+    except Exception:
+        return 0
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  LEDGER LINKS (Dependencies, Blockers, Parent-Child)
+# ═══════════════════════════════════════════════════════════════════════
+
+LINKS_FILE_NAME = "links.jsonl"
+
+
+def get_links(
+    item_id: str,
+    project_path: str = ".",
+) -> Dict[str, Any]:
+    """Get all links/relationships for a ledger item."""
+    _ensure(project_path)
+    ledger_dir = _project_ledger_dir(project_path)
+    links_file = ledger_dir / LINKS_FILE_NAME
+
+    if not links_file.exists():
+        return {"item_id": item_id, "links": [], "count": 0}
+
+    links = []
+    try:
+        for line in links_file.read_text().strip().split("\n"):
+            if not line.strip():
+                continue
+            link = json.loads(line)
+            if link.get("from") == item_id or link.get("to") == item_id:
+                links.append(link)
+    except Exception:
+        pass
+
+    return {"item_id": item_id, "links": links, "count": len(links)}
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  LEDGER QUERY (Natural language → structured queries)
 # ═══════════════════════════════════════════════════════════════════════
@@ -492,23 +535,6 @@ def query_ledger(query: str, project_path: str = ".") -> Dict[str, Any]:
         words = q.split()
         matches = [i for i in all_items if any(w in i.get("title", "").lower() for w in words)]
         return {"query": query, "intent": "search", "items": [{"id": i["id"], "title": i["title"], "status": i.get("status")} for i in matches[:20]], "count": len(matches)}
-
-
-def _parse_ts(ts_str: str) -> float:
-    """Parse ISO timestamp to epoch seconds."""
-    try:
-        import datetime
-        dt = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-        return dt.timestamp()
-    except Exception:
-        return 0
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  LEDGER LINKS (Dependencies, Blockers, Parent-Child)
-# ═══════════════════════════════════════════════════════════════════════
-
-LINKS_FILE_NAME = "links.jsonl"
 VALID_LINK_TYPES = {"blocks", "blocked_by", "parent", "child", "relates_to", "duplicates"}
 
 
@@ -553,32 +579,6 @@ def link_items(
             f.write(json.dumps(reverse) + "\n")
 
     return {"linked": True, "from": from_id, "to": to_id, "type": link_type}
-
-
-def get_links(
-    item_id: str,
-    project_path: str = ".",
-) -> Dict[str, Any]:
-    """Get all links/relationships for a ledger item."""
-    _ensure(project_path)
-    ledger_dir = _project_ledger_dir(project_path)
-    links_file = ledger_dir / LINKS_FILE_NAME
-
-    if not links_file.exists():
-        return {"item_id": item_id, "links": [], "count": 0}
-
-    links = []
-    try:
-        for line in links_file.read_text().strip().split("\n"):
-            if not line.strip():
-                continue
-            link = json.loads(line)
-            if link.get("from") == item_id or link.get("to") == item_id:
-                links.append(link)
-    except Exception:
-        pass
-
-    return {"item_id": item_id, "links": links, "count": len(links)}
 
 
 def unlink_items(
