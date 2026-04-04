@@ -45,6 +45,26 @@ FREE_TRIAL_LIMITS = {
 }
 
 
+def _revalidate(data: dict) -> dict:
+    """Re-validate against Lemon Squeezy."""
+    key = data.get("key", "")
+    if not key or key.startswith("JAMSONS"):
+        return {"valid": True}
+    try:
+        import urllib.request
+        req_data = json.dumps({"license_key": key}).encode()
+        req = urllib.request.Request(
+            LS_VALIDATE_URL, data=req_data,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read())
+        return {"valid": result.get("valid", False)}
+    except Exception:
+        return {"valid": True, "offline": True}
+
+
 def load_license() -> dict:
     """Load and validate license with re-validation."""
     if not LICENSE_FILE.exists():
@@ -82,6 +102,33 @@ def check_premium() -> bool:
     """Check if user has a valid premium license."""
     lic = load_license()
     return lic.get("tier") in ("pro", "enterprise") and lic.get("valid", False)
+
+
+def _get_monthly_usage(tool_name: str) -> int:
+    if not USAGE_FILE.exists():
+        return 0
+    try:
+        data = json.loads(USAGE_FILE.read_text())
+        return data.get(time.strftime("%Y-%m"), {}).get(tool_name, 0)
+    except Exception:
+        return 0
+
+
+def _increment_usage(tool_name: str) -> int:
+    month_key = time.strftime("%Y-%m")
+    data = {}
+    if USAGE_FILE.exists():
+        try:
+            data = json.loads(USAGE_FILE.read_text())
+        except Exception:
+            pass
+    if month_key not in data:
+        data[month_key] = {}
+    data[month_key][tool_name] = data[month_key].get(tool_name, 0) + 1
+    count = data[month_key][tool_name]
+    USAGE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    USAGE_FILE.write_text(json.dumps(data, indent=2))
+    return count
 
 
 def gate_tool(tool_name: str) -> dict | None:
@@ -161,50 +208,3 @@ def activate(key: str) -> dict:
         LICENSE_FILE.parent.mkdir(parents=True, exist_ok=True)
         LICENSE_FILE.write_text(json.dumps(license_data, indent=2))
         return {"status": "activated", "tier": "pro", "message": "Activated offline."}
-
-
-def _revalidate(data: dict) -> dict:
-    """Re-validate against Lemon Squeezy."""
-    key = data.get("key", "")
-    if not key or key.startswith("JAMSONS"):
-        return {"valid": True}
-    try:
-        import urllib.request
-        req_data = json.dumps({"license_key": key}).encode()
-        req = urllib.request.Request(
-            LS_VALIDATE_URL, data=req_data,
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            result = json.loads(resp.read())
-        return {"valid": result.get("valid", False)}
-    except Exception:
-        return {"valid": True, "offline": True}
-
-
-def _get_monthly_usage(tool_name: str) -> int:
-    if not USAGE_FILE.exists():
-        return 0
-    try:
-        data = json.loads(USAGE_FILE.read_text())
-        return data.get(time.strftime("%Y-%m"), {}).get(tool_name, 0)
-    except Exception:
-        return 0
-
-
-def _increment_usage(tool_name: str) -> int:
-    month_key = time.strftime("%Y-%m")
-    data = {}
-    if USAGE_FILE.exists():
-        try:
-            data = json.loads(USAGE_FILE.read_text())
-        except Exception:
-            pass
-    if month_key not in data:
-        data[month_key] = {}
-    data[month_key][tool_name] = data[month_key].get(tool_name, 0) + 1
-    count = data[month_key][tool_name]
-    USAGE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    USAGE_FILE.write_text(json.dumps(data, indent=2))
-    return count
