@@ -58,6 +58,33 @@ def store_secret(
     return {"stored": safe_name}
 
 
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _log_access(
+    secret_name: str,
+    agent_type: str,
+    tool: str,
+    granted: bool,
+    reason: str,
+) -> None:
+    """Append an entry to the JSONL access log."""
+    log_dir = SECRETS_DIR / "access_log"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "secret_name": secret_name,
+        "agent_type": agent_type,
+        "tool": tool,
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "granted": granted,
+        "reason": reason,
+    }
+    with open(log_dir / "log.jsonl", "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
 def get_secret(
     name: str,
     agent_type: str = "",
@@ -206,30 +233,3 @@ def delete_secret(name: str) -> Dict:
     path.unlink()
     _log_access(safe_name, "", "", granted=True, reason="deleted_by_user")
     return {"deleted": safe_name}
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _log_access(
-    secret_name: str,
-    agent_type: str,
-    tool: str,
-    granted: bool,
-    reason: str,
-) -> None:
-    """Append an entry to the JSONL access log."""
-    log_dir = SECRETS_DIR / "access_log"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    entry = {
-        "secret_name": secret_name,
-        "agent_type": agent_type,
-        "tool": tool,
-        "ts": datetime.now(timezone.utc).isoformat(),
-        "granted": granted,
-        "reason": reason,
-    }
-    with open(log_dir / "log.jsonl", "a") as f:
-        f.write(json.dumps(entry) + "\n")
