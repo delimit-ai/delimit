@@ -122,32 +122,27 @@ def _default_limit_for(tool_name: str) -> int:
     return DEFAULT_LIMIT_FREE
 
 
-def _load_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
-    """Load rate limit overrides from YAML config.
-
-    Returns a dict with optional keys:
-        session_cost_cap: float
-        tools: {tool_name: {limit: int, cost: float}}
-        tiers: {free: int, pro: int, deliberation: int}
-    """
-    if config_path is None:
-        config_path = Path.home() / ".delimit" / "rate_limits.yml"
-
-    if not config_path.exists():
-        return {}
-
+def _coerce_value(val: str) -> Any:
+    """Coerce a YAML scalar string to int, float, or str."""
+    if not val:
+        return val
+    # Remove quotes
+    if (val.startswith('"') and val.endswith('"')) or \
+       (val.startswith("'") and val.endswith("'")):
+        return val[1:-1]
     try:
-        # Use PyYAML if available; fall back to a simple parser
-        try:
-            import yaml
-            with open(config_path) as f:
-                data = yaml.safe_load(f)
-            return data if isinstance(data, dict) else {}
-        except ImportError:
-            return _parse_simple_yaml(config_path)
-    except Exception as exc:
-        logger.warning("Failed to load rate_limits.yml: %s", exc)
-        return {}
+        return int(val)
+    except ValueError:
+        pass
+    try:
+        return float(val)
+    except ValueError:
+        pass
+    if val.lower() in ("true", "yes"):
+        return True
+    if val.lower() in ("false", "no"):
+        return False
+    return val
 
 
 def _parse_simple_yaml(path: Path) -> Dict[str, Any]:
@@ -203,27 +198,32 @@ def _parse_simple_yaml(path: Path) -> Dict[str, Any]:
     return result
 
 
-def _coerce_value(val: str) -> Any:
-    """Coerce a YAML scalar string to int, float, or str."""
-    if not val:
-        return val
-    # Remove quotes
-    if (val.startswith('"') and val.endswith('"')) or \
-       (val.startswith("'") and val.endswith("'")):
-        return val[1:-1]
+def _load_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
+    """Load rate limit overrides from YAML config.
+
+    Returns a dict with optional keys:
+        session_cost_cap: float
+        tools: {tool_name: {limit: int, cost: float}}
+        tiers: {free: int, pro: int, deliberation: int}
+    """
+    if config_path is None:
+        config_path = Path.home() / ".delimit" / "rate_limits.yml"
+
+    if not config_path.exists():
+        return {}
+
     try:
-        return int(val)
-    except ValueError:
-        pass
-    try:
-        return float(val)
-    except ValueError:
-        pass
-    if val.lower() in ("true", "yes"):
-        return True
-    if val.lower() in ("false", "no"):
-        return False
-    return val
+        # Use PyYAML if available; fall back to a simple parser
+        try:
+            import yaml
+            with open(config_path) as f:
+                data = yaml.safe_load(f)
+            return data if isinstance(data, dict) else {}
+        except ImportError:
+            return _parse_simple_yaml(config_path)
+    except Exception as exc:
+        logger.warning("Failed to load rate_limits.yml: %s", exc)
+        return {}
 
 
 class RateLimiter:
@@ -232,20 +232,6 @@ class RateLimiter:
     Thread-safety: NOT thread-safe.  MCP servers are single-threaded per
     session, so this is fine.  If that changes, add a lock.
     """
-
-    def __init__(self, config_path: Optional[Path] = None):
-        # {tool_name: [timestamp, timestamp, ...]}  — sorted ascending
-        self._calls: Dict[str, List[float]] = {}
-        # {tool_name: float}  — cumulative cost per tool this session
-        self._costs: Dict[str, float] = {}
-        # Total session cost
-        self._session_cost: float = 0.0
-        # Session start time
-        self._session_start: float = time.time()
-        # Load config
-        self._config = _load_config(config_path)
-        self._custom_limits: Dict[str, int] = {}
-        self._load_custom_limits()
 
     def _load_custom_limits(self) -> None:
         """Extract per-tool limit overrides from the config."""
@@ -268,6 +254,20 @@ class RateLimiter:
                     self._custom_limits[tool_name] = int(settings["limit"])
                 elif isinstance(settings, (int, float)):
                     self._custom_limits[tool_name] = int(settings)
+
+    def __init__(self, config_path: Optional[Path] = None):
+        # {tool_name: [timestamp, timestamp, ...]}  — sorted ascending
+        self._calls: Dict[str, List[float]] = {}
+        # {tool_name: float}  — cumulative cost per tool this session
+        self._costs: Dict[str, float] = {}
+        # Total session cost
+        self._session_cost: float = 0.0
+        # Session start time
+        self._session_start: float = time.time()
+        # Load config
+        self._config = _load_config(config_path)
+        self._custom_limits: Dict[str, int] = {}
+        self._load_custom_limits()
 
     @property
     def session_cost_cap(self) -> float:
