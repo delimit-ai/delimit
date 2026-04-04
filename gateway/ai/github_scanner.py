@@ -580,6 +580,16 @@ def deep_scan(limit: int = 20) -> Dict[str, Any]:
     }
 
 
+def _save_scan(result: Dict[str, Any], cadence: str, scan_time: datetime) -> Path:
+    """Save scan results to ~/.delimit/github_scans/{date}_{cadence}.json."""
+    SCANS_DIR.mkdir(parents=True, exist_ok=True)
+    filename = scan_time.strftime("%Y-%m-%dT%H%M%S") + f"_{cadence}.json"
+    path = SCANS_DIR / filename
+    path.write_text(json.dumps(result, indent=2, default=str))
+    logger.info("GitHub scan saved to %s", path)
+    return path
+
+
 # ---------------------------------------------------------------------------
 #  Main orchestrator
 # ---------------------------------------------------------------------------
@@ -610,13 +620,3 @@ def scan(cadence: str = "pulse", limit: int = 20) -> Dict[str, Any]:
     _save_scan(result, cadence, scan_start)
 
     return result
-
-
-def _save_scan(result: Dict[str, Any], cadence: str, scan_time: datetime) -> Path:
-    """Save scan results to ~/.delimit/github_scans/{date}_{cadence}.json."""
-    SCANS_DIR.mkdir(parents=True, exist_ok=True)
-    filename = scan_time.strftime("%Y-%m-%dT%H%M%S") + f"_{cadence}.json"
-    path = SCANS_DIR / filename
-    path.write_text(json.dumps(result, indent=2, default=str))
-    logger.info("GitHub scan saved to %s", path)
-    return path
