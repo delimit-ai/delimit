@@ -20,10 +20,6 @@ class HardenedGateway:
     V12 Hardened Gateway with strict evidence contract
     """
     
-    def __init__(self):
-        self.registry = task_registry
-        self._load_tasks()
-    
     def _load_tasks(self):
         """Load all task modules to register handlers"""
         try:
@@ -33,6 +29,10 @@ class HardenedGateway:
             import tasks.explain_diff_v2
         except ImportError as e:
             logger.warning(f"Could not load all tasks: {e}")
+    
+    def __init__(self):
+        self.registry = task_registry
+        self._load_tasks()
     
     def run_validate_api(self, request: ValidateAPIRequest) -> TaskEvidence:
         """Execute validate-api task with typed request/response"""
