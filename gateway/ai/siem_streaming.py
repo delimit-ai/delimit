@@ -169,40 +169,6 @@ def get_status() -> Dict[str, Any]:
     }
 
 
-def forward_event(event: Dict[str, Any]) -> Dict[str, Any]:
-    """Forward a governance event to all enabled SIEM integrations.
-
-    Called automatically by the audit trail when events are recorded.
-    Returns delivery status per integration.
-    """
-    config = _load_config()
-    results = {}
-    event_id = event.get("id", str(time.time()))
-
-    for name, settings in config.items():
-        if not isinstance(settings, dict) or not settings.get("enabled"):
-            continue
-
-        try:
-            if name == "splunk":
-                results[name] = _forward_splunk(event, settings, event_id)
-            elif name == "datadog":
-                results[name] = _forward_datadog(event, settings, event_id)
-            elif name == "eventbridge":
-                results[name] = _forward_eventbridge(event, settings, event_id)
-            elif name == "webhook":
-                results[name] = _forward_webhook(event, settings, event_id)
-        except Exception as e:
-            results[name] = {"status": "error", "error": str(e)}
-            _log_delivery(name, event_id, "error", str(e))
-
-    return {
-        "event_id": event_id,
-        "forwarded_to": list(results.keys()),
-        "results": results,
-    }
-
-
 def _forward_splunk(event: Dict, settings: Dict, event_id: str) -> Dict:
     """Forward to Splunk via HTTP Event Collector (HEC)."""
     import urllib.request
@@ -288,3 +254,37 @@ def _forward_webhook(event: Dict, settings: Dict, event_id: str) -> Dict:
     resp = urllib.request.urlopen(req, timeout=10)
     _log_delivery("webhook", event_id, "ok")
     return {"status": "ok", "http_code": resp.status}
+
+
+def forward_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Forward a governance event to all enabled SIEM integrations.
+
+    Called automatically by the audit trail when events are recorded.
+    Returns delivery status per integration.
+    """
+    config = _load_config()
+    results = {}
+    event_id = event.get("id", str(time.time()))
+
+    for name, settings in config.items():
+        if not isinstance(settings, dict) or not settings.get("enabled"):
+            continue
+
+        try:
+            if name == "splunk":
+                results[name] = _forward_splunk(event, settings, event_id)
+            elif name == "datadog":
+                results[name] = _forward_datadog(event, settings, event_id)
+            elif name == "eventbridge":
+                results[name] = _forward_eventbridge(event, settings, event_id)
+            elif name == "webhook":
+                results[name] = _forward_webhook(event, settings, event_id)
+        except Exception as e:
+            results[name] = {"status": "error", "error": str(e)}
+            _log_delivery(name, event_id, "error", str(e))
+
+    return {
+        "event_id": event_id,
+        "forwarded_to": list(results.keys()),
+        "results": results,
+    }
