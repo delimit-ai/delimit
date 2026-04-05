@@ -154,20 +154,175 @@ def publish(app: str, git_ref: Optional[str] = None) -> Dict[str, Any]:
     return latest
 
 
+DEPLOY_TARGETS = [
+    {"name": "delimit.ai", "url": "https://delimit.ai", "kind": "vercel"},
+    {"name": "electricgrill.com", "url": "https://electricgrill.com", "kind": "vercel"},
+    {"name": "robotax.com", "url": "https://robotax.com", "kind": "vercel"},
+    {"name": "npm:delimit-cli", "url": "https://www.npmjs.com/package/delimit-cli", "kind": "npm"},
+    {"name": "github:delimit-mcp-server", "url": "https://github.com/delimit-ai/delimit-mcp-server", "kind": "github"},
+]
+
+
+def _check_http_health(url: str, timeout: int = 10) -> Dict[str, Any]:
+    """Check HTTP health for a single URL. Returns status, response time, headers."""
+    import ssl
+    import time
+    import urllib.request
+
+    result: Dict[str, Any] = {"url": url, "healthy": False}
+    try:
+        ctx = ssl.create_default_context()
+        req = urllib.request.Request(url, method="GET", headers={"User-Agent": "delimit-deploy-verify/1.0"})
+        start = time.monotonic()
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            elapsed_ms = round((time.monotonic() - start) * 1000)
+            result["status_code"] = resp.status
+            result["response_time_ms"] = elapsed_ms
+            result["healthy"] = 200 <= resp.status < 400
+    except Exception as exc:
+        result["error"] = str(exc)
+        result["status_code"] = None
+        result["response_time_ms"] = None
+    return result
+
+
+def _check_ssl_cert(hostname: str, port: int = 443, warn_days: int = 30) -> Dict[str, Any]:
+    """Validate SSL certificate for a hostname. Checks expiry within warn_days."""
+    import socket
+    import ssl
+
+    result: Dict[str, Any] = {"hostname": hostname, "ssl_valid": False}
+    try:
+        ctx = ssl.create_default_context()
+        with socket.create_connection((hostname, port), timeout=10) as sock:
+            with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
+                cert = ssock.getpeercert()
+                if not cert:
+                    result["error"] = "No certificate returned"
+                    return result
+                not_after_str = cert.get("notAfter", "")
+                # Python ssl cert dates: 'Mon DD HH:MM:SS YYYY GMT'
+                not_after = datetime.strptime(not_after_str, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)
+                now = datetime.now(timezone.utc)
+                days_remaining = (not_after - now).days
+                result["ssl_valid"] = True
+                result["expires"] = not_after.isoformat()
+                result["days_remaining"] = days_remaining
+                result["expiry_warning"] = days_remaining < warn_days
+                if days_remaining < warn_days:
+                    result["warning"] = f"SSL certificate expires in {days_remaining} days (threshold: {warn_days})"
+                # Extract issuer for diagnostics
+                issuer = dict(x[0] for x in cert.get("issuer", ()))
+                result["issuer"] = issuer.get("organizationName", issuer.get("commonName", "unknown"))
+    except Exception as exc:
+        result["error"] = str(exc)
+    return result
+
+
+def _check_npm_version(expected_version: Optional[str] = None) -> Dict[str, Any]:
+    """Check the published npm version of delimit-cli."""
+    import subprocess
+
+    result: Dict[str, Any] = {"package": "delimit-cli", "healthy": False}
+    try:
+        proc = subprocess.run(
+            ["npm", "view", "delimit-cli", "version"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if proc.returncode == 0:
+            published = proc.stdout.strip()
+            result["published_version"] = published
+            result["healthy"] = True
+            if expected_version:
+                result["expected_version"] = expected_version
+                result["version_match"] = published == expected_version
+                if published != expected_version:
+                    result["warning"] = f"Version mismatch: published={published}, expected={expected_version}"
+        else:
+            result["error"] = proc.stderr.strip() or "npm view returned non-zero"
+    except FileNotFoundError:
+        result["error"] = "npm not found on PATH"
+    except subprocess.TimeoutExpired:
+        result["error"] = "npm view timed out after 15s"
+    except Exception as exc:
+        result["error"] = str(exc)
+    return result
+
+
+def _extract_hostname(url: str) -> str:
+    """Extract hostname from a URL."""
+    from urllib.parse import urlparse
+    return urlparse(url).hostname or ""
+
+
 def verify(app: str, env: str, git_ref: Optional[str] = None) -> Dict[str, Any]:
-    """Verify deployment health (stub — returns plan status)."""
-    plans = _list_plans(app=app, env=env)
-    if not plans:
-        return {"app": app, "env": env, "status": "no_deploys", "healthy": False}
-    latest = plans[0]
-    return {
-        "app": app,
-        "env": env,
-        "plan_id": latest["plan_id"],
-        "status": latest["status"],
-        "healthy": latest["status"] in ("published", "planned"),
-        "message": "Health check is a stub — no real endpoint verification yet.",
+    """Verify deployment health with real HTTP checks, SSL validation, and npm version.
+
+    Checks every deployment target for:
+    - HTTP 2xx reachability and response time
+    - SSL certificate validity (warns if expiring within 30 days)
+    - npm published version (for npm targets)
+
+    Also cross-references local deploy plan status when available.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    checks: List[Dict[str, Any]] = []
+    all_healthy = True
+    warnings: List[str] = []
+
+    for target in DEPLOY_TARGETS:
+        entry: Dict[str, Any] = {"name": target["name"], "kind": target["kind"]}
+
+        # HTTP health
+        http = _check_http_health(target["url"])
+        entry["http"] = http
+        if not http.get("healthy"):
+            all_healthy = False
+
+        # SSL cert check
+        hostname = _extract_hostname(target["url"])
+        if hostname:
+            ssl_result = _check_ssl_cert(hostname)
+            entry["ssl"] = ssl_result
+            if ssl_result.get("expiry_warning"):
+                warnings.append(ssl_result.get("warning", f"SSL expiry warning for {hostname}"))
+            if not ssl_result.get("ssl_valid"):
+                all_healthy = False
+
+        # npm version check (only for npm targets)
+        if target["kind"] == "npm":
+            npm_result = _check_npm_version()
+            entry["npm"] = npm_result
+            if not npm_result.get("healthy"):
+                all_healthy = False
+
+        checks.append(entry)
+
+    # Cross-reference deploy plan if one exists
+    plan_info: Optional[Dict[str, Any]] = None
+    plans = _list_plans(app=app or None, env=env or None)
+    if plans:
+        latest = plans[0]
+        plan_info = {
+            "plan_id": latest["plan_id"],
+            "plan_status": latest["status"],
+            "updated_at": latest.get("updated_at"),
+        }
+
+    result: Dict[str, Any] = {
+        "app": app or "all",
+        "env": env or "production",
+        "verified_at": now,
+        "healthy": all_healthy,
+        "targets_checked": len(checks),
+        "targets_healthy": sum(1 for c in checks if c.get("http", {}).get("healthy")),
+        "checks": checks,
     }
+    if warnings:
+        result["warnings"] = warnings
+    if plan_info:
+        result["deploy_plan"] = plan_info
+    return result
 
 
 def rollback(app: str, env: str, to_sha: Optional[str] = None) -> Dict[str, Any]:

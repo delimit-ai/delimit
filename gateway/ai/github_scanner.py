@@ -30,7 +30,7 @@ OWN_REPOS = [
     "delimit-ai/delimit-quickstart",
 ]
 
-INTERNAL_USERS = set()  # configured at runtime
+INTERNAL_USERS = set(filter(None, os.environ.get("DELIMIT_INTERNAL_USERS", "").split(",")))
 
 COMPETITOR_ACTIONS = [
     "tufin/oasdiff-action",

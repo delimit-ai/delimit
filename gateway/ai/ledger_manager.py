@@ -91,10 +91,20 @@ def _register_venture(info: Dict[str, str]):
         VENTURES_FILE.write_text(json.dumps(ventures, indent=2))
 
 
+CENTRAL_LEDGER_DIR = Path.home() / ".delimit" / "ledger"
+
+
 def _project_ledger_dir(project_path: str = ".") -> Path:
-    """Get the ledger directory for the current project."""
-    p = Path(project_path).resolve()
-    return p / ".delimit" / "ledger"
+    """Get the ledger directory — ALWAYS uses central ~/.delimit/ledger/.
+
+    Cross-model handoff fix: Codex and Gemini were writing to $PWD/.delimit/ledger/
+    which caused ledger fragmentation. All models must use the same central location
+    so Claude, Codex, and Gemini see the same items.
+
+    The central ledger at ~/.delimit/ledger/ is the source of truth.
+    Per-project .delimit/ dirs are for policies and config only, not ledger state.
+    """
+    return CENTRAL_LEDGER_DIR
 
 
 def _ensure(project_path: str = "."):

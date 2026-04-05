@@ -61,6 +61,10 @@ def dispatch_task(
     tools_needed: Optional[List[str]] = None,
     constraints: Optional[List[str]] = None,
     context: str = "",
+    task_type: str = "",
+    venture: str = "",
+    variables: Optional[Dict[str, Any]] = None,
+    external_key: str = "",
 ) -> Dict[str, Any]:
     """Create a tracked agent task.
 
@@ -78,6 +82,23 @@ def dispatch_task(
     if priority not in VALID_PRIORITIES:
         return {"error": f"priority must be one of: {', '.join(sorted(VALID_PRIORITIES))}"}
 
+    tasks = _load_tasks()
+
+    normalized_external_key = external_key.strip()
+    if normalized_external_key:
+        for existing in tasks.values():
+            if existing.get("external_key") != normalized_external_key:
+                continue
+            if existing.get("status") in ("dispatched", "in_progress", "handed_off", "done"):
+                prompt = _build_agent_prompt(existing)
+                return {
+                    "status": "deduped",
+                    "task_id": existing["id"],
+                    "task": existing,
+                    "agent_prompt": prompt,
+                    "message": f"Task {existing['id']} already exists for {normalized_external_key}",
+                }
+
     task_id = f"AGT-{uuid.uuid4().hex[:8].upper()}"
 
     task = {
@@ -89,6 +110,10 @@ def dispatch_task(
         "tools_needed": tools_needed or [],
         "constraints": constraints or [],
         "context": context.strip(),
+        "task_type": task_type.strip(),
+        "venture": venture.strip(),
+        "variables": variables or {},
+        "external_key": normalized_external_key,
         "status": "dispatched",
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -97,7 +122,6 @@ def dispatch_task(
         "handoffs": [],
     }
 
-    tasks = _load_tasks()
     tasks[task_id] = task
     _save_tasks(tasks)
 
@@ -134,6 +158,11 @@ def _build_agent_prompt(task: Dict[str, Any]) -> str:
 
     if task.get("context"):
         lines.append(f"\n**Context:**\n{task['context']}")
+
+    if task.get("variables"):
+        lines.append("\n**Variables:**")
+        for key, value in task["variables"].items():
+            lines.append(f"- {key}: {value}")
 
     if task.get("tools_needed"):
         lines.append(f"\n**Tools needed:** {', '.join(task['tools_needed'])}")
@@ -447,7 +476,10 @@ def get_agent_dashboard() -> Dict[str, Any]:
                 "tasks": [
                     {"id": t["id"], "title": t["title"], "status": t["status"],
                      "priority": t.get("priority", "P1"),
-                     "linked_ledger": t.get("linked_ledger_items", [])}
+                     "linked_ledger": t.get("linked_ledger_items", []),
+                     "task_type": t.get("task_type", ""),
+                     "venture": t.get("venture", ""),
+                     "variables": t.get("variables", {})}
                     for t in model_tasks
                 ],
             }
