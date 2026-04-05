@@ -26,7 +26,7 @@ logger = logging.getLogger("delimit.ai.reddit_scanner")
 # ---------------------------------------------------------------------------
 
 SCAN_GROUPS: Dict[str, List[str]] = {
-    "delimit_core": ["ClaudeAI", "vibecoding", "cursor", "AI_Agents"],
+    "delimit_core": ["ClaudeAI", "vibecoding", "cursor", "AI_Agents", "ObsidianMD"],
     "delimit_adjacent": ["devops", "programming", "ContextEngineering", "LocalLLaMA", "MachineLearning"],
     "domainvested": ["Domains", "Entrepreneur", "SideProject", "flipping"],
     "wirereport": ["sportsbook", "sportsbetting"],
@@ -560,3 +560,47 @@ def _save_scan(result: Dict[str, Any], scan_time: datetime) -> Path:
     path.write_text(json.dumps(result, indent=2, default=str))
     logger.info("Scan saved to %s", path)
     return path
+
+
+def fetch_thread(thread_id: str, *, proxy_url: str = PROXY_URL) -> Optional[Dict[str, Any]]:
+    """Fetch a single Reddit thread by ID via the residential proxy."""
+    import urllib.parse
+    import urllib.request
+    reddit_url = f"https://www.reddit.com/comments/{thread_id}.json?raw_json=1"
+    fetch_url = f"{proxy_url}?url={urllib.parse.quote(reddit_url, safe='')}"
+
+    req = urllib.request.Request(
+        fetch_url,
+        headers={"User-Agent": "delimit-scanner/1.0", "Accept": "application/json"},
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+            if isinstance(data, list) and len(data) > 0:
+                post_data = data[0].get("data", {}).get("children", [{}])[0].get("data", {})
+                if post_data:
+                    return {
+                        "id": post_data.get("id", ""),
+                        "title": post_data.get("title", ""),
+                        "author": post_data.get("author", ""),
+                        "score": post_data.get("score", 0),
+                        "num_comments": post_data.get("num_comments", 0),
+                        "subreddit": post_data.get("subreddit", ""),
+                        "permalink": post_data.get("permalink", ""),
+                        "selftext": post_data.get("selftext", ""),
+                        "created_utc": post_data.get("created_utc", 0),
+                    }
+    except Exception as exc:
+        logger.warning("Failed to fetch thread %s: %s", thread_id, exc)
+    return None
+
+
+def monitor_user_engagement(username: str = "delimitdev") -> list:
+    """Monitor engagement on posts by a Reddit user (LED-300).
+
+    Checks recent posts/comments by the user for new replies, upvotes,
+    and engagement signals. Returns a list of alert dicts.
+    """
+    # Stub — full implementation requires residential proxy + Playwright (LED-248)
+    return []

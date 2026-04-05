@@ -124,10 +124,14 @@ def list_secrets() -> List[Dict]:
         return []
     secrets = []
     for f in sorted(SECRETS_DIR.glob("*.json")):
+        if f.name.startswith("_"):
+            continue  # skip internal files like _access_log.json
         try:
             s = json.loads(f.read_text())
+            if not isinstance(s, dict):
+                continue
             secrets.append({
-                "name": s["name"],
+                "name": s.get("name", f.stem),
                 "scope": s.get("scope", "all"),
                 "description": s.get("description", ""),
                 "created_by": s.get("created_by", ""),

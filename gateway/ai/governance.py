@@ -35,6 +35,59 @@ def _is_test_mode() -> bool:
 logger = logging.getLogger("delimit.governance")
 
 
+# ── LED-263: Beta CTA for conversion ────────────────────────────────
+# Tools that should show a beta signup prompt on successful results.
+_BETA_CTA_TOOLS = frozenset({"lint", "scan", "activate", "diff", "quickstart"})
+
+_BETA_CTA = {
+    "text": "Like what you see? Join the beta for priority support and full governance.",
+    "url": "https://app.delimit.ai",
+    "action": "star_repo_or_signup",
+}
+
+
+def _is_beta_user() -> bool:
+    """Check if the current user is already tracked as a founding/beta user."""
+    try:
+        from ai.founding_users import _load_founding_users
+        data = _load_founding_users()
+        if data.get("users"):
+            return True
+    except Exception:
+        pass
+    # Also check if a Pro license is active (paying users don't need the CTA)
+    try:
+        from ai.license import get_license
+        lic = get_license()
+        if lic.get("tier", "free") != "free":
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _result_is_successful(result: Dict[str, Any]) -> bool:
+    """Return True if a tool result looks like a success (no errors)."""
+    if result.get("error"):
+        return False
+    if result.get("status") in ("error", "failed", "blocked"):
+        return False
+    if result.get("governance_blocked"):
+        return False
+    return True
+
+
+def _maybe_beta_cta(tool_name: str, result: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    """Return a beta CTA dict if the tool qualifies and the user is not already signed up."""
+    if tool_name not in _BETA_CTA_TOOLS:
+        return None
+    if not _result_is_successful(result):
+        return None
+    if _is_beta_user():
+        return None
+    return dict(_BETA_CTA)
+
+
 def _ledger_list_items(project_path: str = ".") -> Dict[str, Any]:
     """Indirection layer so tests can patch governance-local ledger hooks."""
     import ai.ledger_manager as _lm
@@ -675,6 +728,11 @@ def govern(tool_name: str, result: Dict[str, Any], project_path: str = ".") -> D
         # Excluded tools still get the next_steps field (empty) for schema consistency
         if "next_steps" not in governed_result:
             governed_result["next_steps"] = []
+
+    # LED-263: Beta CTA on successful lint/scan/activate/diff results
+    cta = _maybe_beta_cta(clean_name, governed_result)
+    if cta:
+        governed_result["beta_cta"] = cta
 
     return governed_result
 

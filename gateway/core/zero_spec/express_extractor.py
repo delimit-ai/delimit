@@ -264,10 +264,10 @@ def extract_express_spec(
             "error_type": "missing_deps",
         }
 
-    # Write extractor script to temp file inside the project (so require() resolves)
+    # Write extractor script to a system temp file; module resolution uses projectRoot.
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".js", prefix="_delimit_extract_",
-        dir=str(root), delete=False,
+        delete=False,
     ) as f:
         f.write(_EXTRACTOR_SCRIPT)
         script_path = f.name

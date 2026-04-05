@@ -6,6 +6,7 @@ for full fidelity.
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -156,13 +157,40 @@ def extract_nestjs_spec(
         )
         ext = ".js"
 
-    # Write temp script
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=ext, prefix="_delimit_extract_",
-        dir=str(root), delete=False,
-    ) as f:
-        f.write(script_content)
-        script_path = f.name
+    temp_workspace: Optional[Path] = None
+    exec_root = root
+
+    if is_typescript:
+        # TypeScript resolution depends on nearby node_modules/tsconfig and
+        # relative imports from the generated extractor script.
+        temp_workspace = Path(tempfile.mkdtemp(prefix="_delimit_extract_"))
+        exec_root = temp_workspace
+
+        top_level = module_path.lstrip("./").split("/", 1)[0]
+        for name in ("node_modules", "package.json", "nest-cli.json"):
+            src = root / name
+            if src.exists():
+                (temp_workspace / name).symlink_to(src, target_is_directory=src.is_dir())
+        for cfg in root.glob("tsconfig*.json"):
+            (temp_workspace / cfg.name).symlink_to(cfg)
+        if top_level:
+            src = root / top_level
+            if src.exists():
+                (temp_workspace / top_level).symlink_to(src, target_is_directory=src.is_dir())
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=ext, prefix="_delimit_extract_",
+            dir=str(temp_workspace), delete=False,
+        ) as f:
+            f.write(script_content)
+            script_path = f.name
+    else:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=ext, prefix="_delimit_extract_",
+            delete=False,
+        ) as f:
+            f.write(script_content)
+            script_path = f.name
 
     try:
         # Build command
@@ -179,7 +207,7 @@ def extract_nestjs_spec(
             capture_output=True,
             text=True,
             timeout=timeout,
-            cwd=str(root),
+            cwd=str(exec_root),
             env={**os.environ, "NODE_ENV": "development"},
         )
 
@@ -248,7 +276,10 @@ def extract_nestjs_spec(
         }
     finally:
         try:
-            os.unlink(script_path)
+            if temp_workspace is not None:
+                shutil.rmtree(temp_workspace)
+            else:
+                os.unlink(script_path)
         except OSError:
             pass
 
