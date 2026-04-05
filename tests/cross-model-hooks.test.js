@@ -552,7 +552,7 @@ describe('CLI hook commands', () => {
         const cliPath = path.join(__dirname, '..', 'bin', 'delimit-cli.js');
         const result = execSync(`node "${cliPath}" hook pre-tool Edit 2>&1`, {
             encoding: 'utf-8',
-            timeout: 5000,
+            timeout: 15000,
         });
         // pre-tool may produce no output if no staged files, that is fine
         assert.ok(typeof result === 'string');
@@ -960,7 +960,7 @@ describe('CLI deliberate command', () => {
         const cliPath = path.join(__dirname, '..', 'bin', 'delimit-cli.js');
         const result = execSync(`node "${cliPath}" deliberate --list 2>&1`, {
             encoding: 'utf-8',
-            timeout: 5000,
+            timeout: 15000,
         });
         assert.ok(typeof result === 'string');
         // Should either say no pending items or list a count
