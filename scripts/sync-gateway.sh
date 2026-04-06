@@ -58,8 +58,11 @@ rsync -a --delete \
 cp "$GATEWAY_SRC/requirements.txt" "$NPM_ROOT/gateway/requirements.txt" 2>/dev/null || true
 
 # ── Also sync to installed server (if present) ────────────────────────
+# Skip with SKIP_SERVER_SYNC=1 to avoid disconnecting active MCP sessions
 INSTALLED_SERVER="$HOME/.delimit/server"
-if [ -d "$INSTALLED_SERVER/ai" ]; then
+if [ "${SKIP_SERVER_SYNC:-}" = "1" ]; then
+    echo "  ⏭️  Skipping installed server sync (SKIP_SERVER_SYNC=1)"
+elif [ -d "$INSTALLED_SERVER/ai" ]; then
     echo "  Syncing to installed server ($INSTALLED_SERVER)..."
     rsync -a --delete \
         --exclude='__pycache__' \

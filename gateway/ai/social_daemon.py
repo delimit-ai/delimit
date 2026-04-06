@@ -19,6 +19,13 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("delimit.ai.social_daemon")
 
+# ── Vertex AI credentials (prefer ADC from gcloud auth) ─────────────
+_adc_path = str(Path.home() / ".config" / "gcloud" / "application_default_credentials.json")
+if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") and os.path.exists(_adc_path):
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _adc_path
+if not os.environ.get("GOOGLE_CLOUD_PROJECT"):
+    os.environ["GOOGLE_CLOUD_PROJECT"] = "jamsons"
+
 # ── Configuration ────────────────────────────────────────────────────
 # Default to 15 minutes (900 seconds)
 SCAN_INTERVAL = int(os.environ.get("DELIMIT_SOCIAL_SCAN_INTERVAL", "900"))
@@ -205,26 +212,50 @@ def _build_compact_summary(targets: List[Dict], processed: Dict) -> Dict[str, An
     }
 
 
+_scan_digest_count_today: int = 0
+_scan_digest_last_date: str = ""
+_SCAN_DIGEST_MAX_PER_DAY = 4  # Max scan digest emails per day
+
+
 def _send_scan_digest(compact: Dict, processed: Dict) -> None:
     """Send a digest email summarizing the scan results.
 
-    Only sends if there are new high-priority targets, new drafts, or new ledger items.
+    Only sends if there are REAL actionable items (ready drafts, not placeholders).
     Suppresses digest if nothing actionable to avoid email fatigue.
+    Capped at 4 per day to prevent inbox flooding.
     """
+    global _scan_digest_count_today, _scan_digest_last_date
     try:
         from ai.notify import send_email
 
         s = compact.get("summary", {})
         high = s.get("high_priority", 0)
-        drafted = s.get("drafted", 0)
         ledger_items = s.get("ledger_items", 0)
         total = s.get("total_new_targets", 0)
         platforms = s.get("platform_breakdown", {})
-        owner_actions = len(processed.get("owner_actions", []))
 
-        # Only send if there's something actionable
-        if high == 0 and drafted == 0 and ledger_items == 0 and owner_actions == 0:
+        # Count only REAL owner actions (not placeholder drafts)
+        owner_actions = [a for a in processed.get("owner_actions", []) if a.get("draft_id")]
+        real_owner_actions = len(owner_actions)
+
+        # Count ready drafts only (not placeholders that failed quality check)
+        real_drafted = len([d for d in processed.get("drafted", [])
+                          if not d.get("suppressed_reason") and not d.get("deduped")])
+
+        # Only send if there's something genuinely actionable
+        if high == 0 and real_drafted == 0 and ledger_items == 0 and real_owner_actions == 0:
             return
+
+        # Daily cap — reset counter at midnight
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if today != _scan_digest_last_date:
+            _scan_digest_count_today = 0
+            _scan_digest_last_date = today
+        if _scan_digest_count_today >= _SCAN_DIGEST_MAX_PER_DAY:
+            logger.info("Scan digest daily cap reached (%d/%d). Suppressing.",
+                       _scan_digest_count_today, _SCAN_DIGEST_MAX_PER_DAY)
+            return
+        _scan_digest_count_today += 1
 
         lines = []
         lines.append(f"Social scan found {total} new targets across {platforms}.")
@@ -241,8 +272,8 @@ def _send_scan_digest(compact: Dict, processed: Dict) -> None:
                     lines.append(f"  {url}")
                 lines.append("")
 
-        if drafted > 0:
-            lines.append(f"DRAFTS: {drafted} reply drafts created")
+        if real_drafted > 0:
+            lines.append(f"DRAFTS: {real_drafted} ready drafts (quality-checked)")
             lines.append("")
             # Include actual draft text for ready drafts
             for action in processed.get("owner_actions", []):
@@ -273,8 +304,8 @@ def _send_scan_digest(compact: Dict, processed: Dict) -> None:
             lines.append(f"LEDGER: {ledger_items} items added to project ledger")
             lines.append("")
 
-        if owner_actions > 0:
-            lines.append(f"ACTIONS: {owner_actions} items need your review")
+        if real_owner_actions > 0:
+            lines.append(f"ACTIONS: {real_owner_actions} items need your review")
             lines.append("")
 
         cache = compact.get("cache_stats", {})
@@ -283,7 +314,7 @@ def _send_scan_digest(compact: Dict, processed: Dict) -> None:
 
         send_email(
             message="\n".join(lines),
-            subject=f"[SOCIAL] {high} high-pri, {drafted} drafts, {total} targets",
+            subject=f"[SOCIAL] {high} high-pri, {real_drafted} ready drafts, {real_owner_actions} actions",
             event_type="social_digest",
         )
     except Exception as e:
