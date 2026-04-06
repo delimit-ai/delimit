@@ -174,8 +174,13 @@ async function main() {
     fs.mkdirSync(path.join(DELIMIT_HOME, 'evidence'), { recursive: true });
 
     // Copy the gateway core from our bundled copy
+    // Skip if server dirs are symlinks (dev machine using gateway source directly)
+    const serverAiDir = path.join(DELIMIT_HOME, 'server', 'ai');
+    const isDevSymlink = fs.existsSync(serverAiDir) && fs.lstatSync(serverAiDir).isSymbolicLink();
     const gatewaySource = path.join(__dirname, '..', 'gateway');
-    if (fs.existsSync(gatewaySource)) {
+    if (isDevSymlink) {
+        await logp(`  ${green('✓')} Server linked to gateway source (dev mode)`);
+    } else if (fs.existsSync(gatewaySource)) {
         copyDir(gatewaySource, path.join(DELIMIT_HOME, 'server'));
         await logp(`  ${green('✓')} Core engine installed`);
     } else {
@@ -216,7 +221,8 @@ async function main() {
     }
 
     // Re-copy gateway source AFTER Pro modules to ensure full files aren't overwritten by stubs
-    if (fs.existsSync(gatewaySource)) {
+    // Skip if dev symlinks are in place
+    if (fs.existsSync(gatewaySource) && !isDevSymlink) {
         copyDir(gatewaySource, path.join(DELIMIT_HOME, 'server'));
     }
 

@@ -132,6 +132,62 @@ def get_next_build_task(session: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 # ── Swarm Dispatch & Execution ───────────────────────────────────────
 
+def loop_config(session_id: str = "", max_iterations: int = 0,
+                cost_cap: float = 0.0, auto_consensus: bool = False,
+                error_threshold: int = 0, status: str = "",
+                require_approval_for: list = None) -> Dict[str, Any]:
+    """Configure or create a loop session with safeguards."""
+    _ensure_session_dir()
+
+    # Load existing or create new
+    if session_id:
+        path = SESSION_DIR / f"{session_id}.json"
+        if path.exists():
+            session = json.loads(path.read_text())
+        else:
+            session = {
+                "session_id": session_id,
+                "type": "governed_build",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "iterations": 0,
+                "max_iterations": max_iterations or MAX_ITERATIONS_DEFAULT,
+                "cost_incurred": 0.0,
+                "cost_cap": cost_cap or MAX_COST_DEFAULT,
+                "errors": 0,
+                "error_threshold": error_threshold or MAX_ERRORS_DEFAULT,
+                "tasks_completed": [],
+                "status": status or "running",
+            }
+    else:
+        session = create_governed_session()
+
+    # Apply non-zero/non-empty overrides
+    if max_iterations > 0:
+        session["max_iterations"] = max_iterations
+    if cost_cap > 0:
+        session["cost_cap"] = cost_cap
+    if error_threshold > 0:
+        session["error_threshold"] = error_threshold
+    if status:
+        session["status"] = status
+    if auto_consensus:
+        session["auto_consensus"] = True
+    if require_approval_for is not None:
+        session["require_approval_for"] = require_approval_for
+
+    _save_session(session)
+    return {
+        "session_id": session["session_id"],
+        "status": session["status"],
+        "max_iterations": session["max_iterations"],
+        "iterations": session.get("iterations", 0),
+        "cost_cap": session["cost_cap"],
+        "cost_incurred": session.get("cost_incurred", 0.0),
+        "error_threshold": session["error_threshold"],
+        "errors": session.get("errors", 0),
+    }
+
+
 def run_governed_iteration(session_id: str) -> Dict[str, Any]:
     """Execute one governed build iteration."""
     from datetime import datetime, timezone

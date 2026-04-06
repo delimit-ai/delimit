@@ -39,7 +39,7 @@ _email_throttle_lock = threading.Lock()
 _email_send_times: list = []  # timestamps of recent sends
 _email_digest_queue: list = []  # batched non-urgent emails
 _EMAIL_MAX_PER_HOUR = 10
-_EMAIL_DIGEST_INTERVAL = 1800  # 30 minutes
+_EMAIL_DIGEST_INTERVAL = 3600  # 60 minutes (was 30 — reduce digest flood)
 _last_digest_flush = 0.0
 
 logger = logging.getLogger("delimit.ai.notify")
@@ -331,6 +331,12 @@ def _flush_email_digest():
 
     items = list(_email_digest_queue)
     _email_digest_queue.clear()
+
+    # Drop pure noise items — zero-action social scans, heartbeats
+    noise_types = {"heartbeat", "scan_summary", "daemon_status", "digest_suppressed"}
+    items = [i for i in items if i.get("event_type", "") not in noise_types]
+    if not items:
+        return
 
     # Rank items by priority: security/alert first, then actions, then drafts
     PRIORITY_ORDER = {
@@ -796,11 +802,13 @@ def send_email(
     event_key = (event_type or "").lower()
     subject_lower = (subject or "").lower()
 
-    # Batch automated scan output — social drafts, daemon status, scan results
-    # These get aggregated into a single digest email ranked by priority
+    # Batch automated scan output — daemon heartbeats, scan summaries
+    # NOTE: social_draft sends IMMEDIATELY — those are the actionable emails
+    # with copy text + links that the founder needs to post from.
     force_digest = event_key in (
         "daemon_status", "scan_summary", "heartbeat",
-        "social_draft", "github_outreach_queued",
+        "github_outreach_queued",
+        "social_digest", "digest_suppressed",
     )
 
     # Only these event types send immediately (founder needs to see them now)
@@ -808,7 +816,7 @@ def send_email(
                     for tag in ("p0", "urgent", "alert", "critical", "approve",
                                 "founder_directive", "gate_failure",
                                 "security", "deploy", "action",
-                                "completed"))
+                                "completed", "social_draft"))
 
     global _last_digest_flush
     with _email_throttle_lock:
