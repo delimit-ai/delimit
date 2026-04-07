@@ -838,16 +838,10 @@ delimit_run_and_exit() {
     exit \$_RC
 }
 
-# Find real binary — check renamed binary first, then common paths
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# 1. Check for renamed binary (tool-real) next to this shim
-[ -x "$SCRIPT_DIR/${toolName}-real" ] && delimit_run_and_exit "$SCRIPT_DIR/${toolName}-real" "$@"
-# 2. Check common paths (skip self)
-SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
-for c in /usr/local/bin/${toolName}-real /usr/bin/${toolName}-real "$HOME/.local/bin/${toolName}-real" /usr/bin/${toolName} /usr/local/bin/${toolName} "$HOME/.local/bin/${toolName}" "$(npm bin -g 2>/dev/null)/${toolName}"; do
-    [ -x "$c" ] && [ "$(readlink -f "$c" 2>/dev/null)" != "$SELF" ] && delimit_run_and_exit "$c" "$@"
-done
-# 3. Last resort: search PATH excluding shim directory
+# Find real binary by stripping shim dir from PATH.
+# We rely on PATH ordering ($HOME/.delimit/shims first) — no rename hack,
+# no race with npm reinstalls. Previously we used mv tool→tool-real + cp shim,
+# which broke whenever npm/brew clobbered the binary mid-operation.
 REAL=$(PATH=$(echo "$PATH" | tr ':' '\\n' | grep -v '.delimit/shims' | tr '\\n' ':') command -v ${toolName} 2>/dev/null)
 [ -x "$REAL" ] && delimit_run_and_exit "$REAL" "$@"
 echo "[Delimit] ${toolName} not found in PATH" >&2
@@ -866,59 +860,17 @@ exit 127
                 fs.chmodSync(shimPath, '755');
             }
 
-            // Rename+wrap: place shim at the real binary's location
-            // so it works immediately without PATH changes
-            for (const tool of ['claude', 'codex', 'gemini']) {
-                try {
-                    // Find real binary location
-                    let realPath = null;
-                    const searchPaths = [
-                        `/usr/local/bin/${tool}`,
-                        `/usr/bin/${tool}`,
-                        path.join(os.homedir(), '.local', 'bin', tool),
-                    ];
-                    // Also check npm global bin
-                    try {
-                        const npmBin = execSync('npm bin -g 2>/dev/null', { encoding: 'utf-8', timeout: 3000 }).trim();
-                        if (npmBin) searchPaths.push(path.join(npmBin, tool));
-                    } catch {}
-
-                    for (const p of searchPaths) {
-                        try {
-                            if (fs.existsSync(p) && fs.statSync(p).isFile()) {
-                                // Check it's the real binary, not already our shim
-                                const content = fs.readFileSync(p, 'utf-8').substring(0, 200);
-                                if (!content.includes('Delimit Governance Shim')) {
-                                    realPath = p;
-                                    break;
-                                }
-                            }
-                        } catch {}
-                    }
-
-                    if (realPath) {
-                        const dir = path.dirname(realPath);
-                        const realDest = path.join(dir, `${tool}-real`);
-                        // Only rename if not already renamed
-                        if (!fs.existsSync(realDest)) {
-                            fs.renameSync(realPath, realDest);
-                        }
-                        // Place our shim at the original location
-                        const shimContent = fs.readFileSync(path.join(shimsDir, tool), 'utf-8');
-                        // Update shim to also check for tool-real in same directory
-                        const patchedShim = shimContent.replace(
-                            `echo "[Delimit] ${tool} not found in PATH"`,
-                            `# Check for renamed binary next to shim\n` +
-                            `SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"\n` +
-                            `[ -x "$SCRIPT_DIR/${tool}-real" ] && delimit_run_and_exit "$SCRIPT_DIR/${tool}-real" "$@"\n` +
-                            `echo "[Delimit] ${tool} not found in PATH"`
-                        );
-                        fs.writeFileSync(realPath, patchedShim);
-                        fs.chmodSync(realPath, '755');
-                        log(`  ${green('✓')} ${tool}: wrapped at ${dim(realPath)}`);
-                    }
-                } catch {}
-            }
+            // Governance is enforced via PATH ordering — $HOME/.delimit/shims
+            // is prepended to PATH (see below), so `claude`/`codex`/`gemini`
+            // resolve to our shim first, and the shim then PATH-strips itself
+            // and execs the real binary.
+            //
+            // We deliberately do NOT mv /usr/bin/claude → claude-real and copy
+            // the shim into /usr/bin/claude. That rename+wrap approach raced
+            // with npm reinstalls (which clobber /usr/bin/claude back to a
+            // symlink), leaving users with "[Delimit] claude not found in PATH"
+            // when the rename ran but the shim copy failed or the symlink got
+            // re-created mid-operation. PATH ordering is the durable contract.
 
             // Add to PATH in shell rc files (create if missing)
             const pathLine = `export PATH="${shimsDir}:$PATH"  # Delimit governance wrapping`;
