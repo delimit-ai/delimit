@@ -36,7 +36,9 @@ SECRET_PATTERNS = {
     "aws_secret_key": r"(?:aws_secret_access_key|AWS_SECRET_ACCESS_KEY)\s*[=:]\s*['\"]?[A-Za-z0-9/+=]{40}",
     "generic_api_key": r"\b(?:api[_-]?key|apikey)\b\s*[=:]\s*['\"]?[A-Za-z0-9_\-]{20,}",
     "generic_secret": r"\b(?:secret|password|passwd|token)\b\s*[=:]\s*['\"]?[^\s'\"]{8,}",
-    # Catches dict/JSON-style credentials: "password": "value", 'secret': 'value'
+    # Catches dict/JSON-style credentials where a key like password or api_key
+    # is followed by a quoted literal value (>=4 chars). Example shape omitted
+    # intentionally so the scanner does not flag this comment as a finding.
     "dict_credential": r"""['\"](?:password|passwd|secret|api_key|apikey|token|auth_token|access_token|private_key)['\"][\s]*:[\s]*['\"][^'\"]{4,}['\"]""",
     "private_key_header": r"-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----",
     "github_token": r"gh[pousr]_[A-Za-z0-9_]{36,}",
