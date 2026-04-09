@@ -1,5 +1,11 @@
 # Changelog
 
+## [4.1.45] - 2026-04-09
+
+### Fixed
+- **Shim rename-hack removed** — install no longer races with npm reinstalls that clobbered `/usr/bin/claude` back to a symlink, causing `[Delimit] claude not found in PATH` mid-session. Shim now relies purely on `$HOME/.delimit/shims` being first in `PATH` plus a PATH-strip lookup for the real binary. Fixes regressions from the claude-real rename+wrap install mechanism.
+- Shim exit screen parity and CLI lint output parity (LED-078, LED-087).
+
 ## [4.20.0] - 2026-04-20
 
 *The highest state of AI governance.*
