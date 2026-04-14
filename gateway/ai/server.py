@@ -136,6 +136,49 @@ def _sanitize_path(user_path: str, label: str = "path") -> Path:
     return resolved
 
 
+# LED-881 / #40: Confused-deputy guard for LLM-controlled repo parameters.
+# Originally reported as command injection (not exploitable — argv list, no
+# shell=True). Reporter's second-pass framing identified the real concern: a
+# prompt-injected LLM could ask a sensor tool to read issue comments from any
+# repo the caller's gh token can see, including private ones.
+#
+# Mitigation: opt-in allowlist via DELIMIT_ALLOWED_REPOS env var.
+#   - Unset (default): pass through, emit one-time warning per process.
+#   - Set: CSV of owner/repo entries. Repos outside the list are refused.
+_REPO_ALLOWLIST_WARNED = False
+
+
+def _check_repo_allowlist(repo: str) -> Optional[Dict[str, Any]]:
+    """Return a structured refusal dict when the repo is outside the
+    configured allowlist. Return None when the call should proceed.
+    Env var: DELIMIT_ALLOWED_REPOS = "owner/a,owner/b,org/c"
+    """
+    global _REPO_ALLOWLIST_WARNED
+    allowlist_raw = os.environ.get("DELIMIT_ALLOWED_REPOS", "").strip()
+    if not allowlist_raw:
+        if not _REPO_ALLOWLIST_WARNED:
+            logger.warning(
+                "DELIMIT_ALLOWED_REPOS is unset — LLM-controlled repo parameters "
+                "will pass through to gh api using the caller's token. Set "
+                "DELIMIT_ALLOWED_REPOS=\"owner/a,owner/b\" to scope which repos "
+                "sensor tools are permitted to reach. See delimit-mcp-server#40."
+            )
+            _REPO_ALLOWLIST_WARNED = True
+        return None
+    allowed = {entry.strip().lower() for entry in allowlist_raw.split(",") if entry.strip()}
+    if (repo or "").strip().lower() not in allowed:
+        return {
+            "error": "repo_not_allowlisted",
+            "repo": repo,
+            "allowed": sorted(allowed),
+            "hint": (
+                "This repo is not in DELIMIT_ALLOWED_REPOS. Add it to the env "
+                "var or use a different tool. See delimit-mcp-server#40."
+            ),
+        }
+    return None
+
+
 def _sanitize_subprocess_arg(value: str, label: str = "argument") -> str:
     """Sanitize a single subprocess argument against injection.
 
@@ -3689,11 +3732,19 @@ async def delimit_sensor_github_issue(
         since_comment_id: Last seen comment ID. Pass 0 to get all comments.
     """
     import re as _re
-    # Validate inputs to prevent injection
+    # Validate inputs — defense-in-depth even though subprocess.run with
+    # list argv (no shell=True) makes classic injection inert. See #40.
     if not _re.match(r'^[\w.-]+/[\w.-]+$', repo):
         return _with_next_steps("sensor_github_issue", {"error": f"Invalid repo format: {repo}. Use owner/repo."})
+    if '..' in repo:
+        return _with_next_steps("sensor_github_issue", {"error": "Invalid repo: path traversal sequences not allowed"})
     if not isinstance(issue_number, int) or issue_number <= 0:
         return _with_next_steps("sensor_github_issue", {"error": f"Invalid issue number: {issue_number}"})
+
+    # LED-881 / #40 confused-deputy guard
+    refusal = _check_repo_allowlist(repo)
+    if refusal is not None:
+        return _with_next_steps("sensor_github_issue", refusal)
 
     try:
         # Fetch comments
@@ -3809,6 +3860,19 @@ def delimit_sensor_github_migrations(
         repos: List of GitHub repos in owner/repo format (e.g. ["chatwoot/chatwoot", "cal-com/cal.com"]).
         limit: Max migration signals per repo. Default 20.
     """
+    # LED-881 / #40 confused-deputy guard — applied per-repo.
+    refusals = []
+    for r in (repos or []):
+        refusal = _check_repo_allowlist(r)
+        if refusal is not None:
+            refusals.append(refusal)
+    if refusals:
+        return _with_next_steps("sensor_github_migrations", {
+            "error": "repo_not_allowlisted",
+            "refused": refusals,
+            "total_signals": 0,
+        })
+
     try:
         from ai.social_target import scan_github_migrations
         signals = scan_github_migrations(repos=repos, limit=limit)
