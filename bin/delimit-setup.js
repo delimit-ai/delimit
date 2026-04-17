@@ -784,7 +784,16 @@ delimit_exit_screen() {
     # launch; commits made in other repos during the session would be missed.
     # Scan a best-effort set of known roots plus the launch cwd.
     COMMITS=0
-    REPO_ROOTS="\$SESSION_CWD \$HOME/delimit-gateway \$HOME/delimit-ui \$HOME/delimit-action \$HOME/npm-delimit \$HOME/delimit-private"
+    # Customer-facing: scan launch cwd, its parent, and common project roots.
+    # If an org or solo dev keeps multiple repos in \$HOME or \$HOME/code, commits
+    # there during a session get counted.
+    REPO_ROOTS="\$SESSION_CWD"
+    for parent in "\$SESSION_CWD/.." "\$HOME" "\$HOME/code" "\$HOME/src" "\$HOME/projects"; do
+        [ -d "\$parent" ] || continue
+        for d in "\$parent"/*/.git; do
+            [ -d "\$d" ] && REPO_ROOTS="\$REPO_ROOTS \$(dirname \$d)"
+        done
+    done
     for r in \$REPO_ROOTS; do
         [ -d "\$r/.git" ] || continue
         C=\$(git -C "\$r" log --after="@\$SESSION_START" --format="%H" 2>/dev/null | wc -l | tr -d ' ')
