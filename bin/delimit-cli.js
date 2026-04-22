@@ -5768,8 +5768,7 @@ program
             // Try to run deliberation directly via the gateway
             const HOME = process.env.HOME || require('os').homedir();
             const gatewayScript = path.join(HOME, '.delimit', 'server', 'ai', 'deliberation.py');
-            const gatewayAlt = '/home/delimit/delimit-gateway/ai/deliberation.py';
-            const scriptPath = fs.existsSync(gatewayScript) ? gatewayScript : fs.existsSync(gatewayAlt) ? gatewayAlt : null;
+            const scriptPath = fs.existsSync(gatewayScript) ? gatewayScript : null;
 
             if (scriptPath) {
                 console.log(chalk.dim('Running multi-model deliberation...\n'));

@@ -780,15 +780,30 @@ delimit_exit_screen() {
     else
         DURATION="\${ELAPSED}s"
     fi
-    # Count git commits made during session (@ prefix tells git the value is epoch)
+    # Count git commits made during session. SESSION_CWD is captured at shim
+    # launch; commits made in other repos during the session would be missed.
+    # Scan a best-effort set of known roots plus the launch cwd.
     COMMITS=0
-    if [ -d "\$SESSION_CWD/.git" ] || git -C "\$SESSION_CWD" rev-parse --git-dir >/dev/null 2>&1; then
-        COMMITS=\$(git -C "\$SESSION_CWD" log --oneline --after="@\$SESSION_START" --format="%H" 2>/dev/null | wc -l | tr -d ' ')
-    fi
-    # Count ledger items created during session (by timestamp)
+    # Customer-facing: scan launch cwd, its parent, and common project roots.
+    # If an org or solo dev keeps multiple repos in \$HOME or \$HOME/code, commits
+    # there during a session get counted.
+    REPO_ROOTS="\$SESSION_CWD"
+    for parent in "\$SESSION_CWD/.." "\$HOME" "\$HOME/code" "\$HOME/src" "\$HOME/projects"; do
+        [ -d "\$parent" ] || continue
+        for d in "\$parent"/*/.git; do
+            [ -d "\$d" ] && REPO_ROOTS="\$REPO_ROOTS \$(dirname \$d)"
+        done
+    done
+    for r in \$REPO_ROOTS; do
+        [ -d "\$r/.git" ] || continue
+        C=\$(git -C "\$r" log --after="@\$SESSION_START" --format="%H" 2>/dev/null | wc -l | tr -d ' ')
+        COMMITS=\$((COMMITS + C))
+    done
+    # Count ledger items created during session (by timestamp).
+    # Ledger JSON is written with ": " (space) between key and value, and ISO
+    # timestamps end with "Z" (UTC), so the regex must tolerate both.
     LEDGER_DIR="\$DELIMIT_HOME/ledger"
     LEDGER_ITEMS=0
-    # Convert epoch SESSION_START to ISO prefix for string comparison
     SESSION_ISO=\$(date -u -d "@\$SESSION_START" +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u -r "\$SESSION_START" +%Y-%m-%dT%H:%M:%S 2>/dev/null || echo "")
     if [ -d "\$LEDGER_DIR" ] && [ -n "\$SESSION_ISO" ]; then
         for lf in "\$LEDGER_DIR"/*.jsonl; do
@@ -796,7 +811,7 @@ delimit_exit_screen() {
             COUNT=\$(awk -v start="\$SESSION_ISO" '
                 BEGIN { n=0 }
                 {
-                    if (match(\$0, /"created_at":"([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})"/, arr)) {
+                    if (match(\$0, /"created_at"[[:space:]]*:[[:space:]]*"([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})Z?"/, arr)) {
                         if (arr[1] >= start) n++
                     }
                 }

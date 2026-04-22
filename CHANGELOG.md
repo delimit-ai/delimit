@@ -1,5 +1,31 @@
 # Changelog
 
+## [4.2.0] - 2026-04-21
+
+### Added (gateway sync — LED-987 through LED-1008)
+- **Venture tagging (LED-1008)** — work orders, deliberations, and social drafts carry a canonical venture tag propagated through `save_draft` and the Supabase sync writers. `_normalize_venture` maps freeform strings (e.g., "DomainVested", "wire.report", "LT") to the canonical 4-member vocabulary (delimit / domainvested / wirereport / livetube). Unknown values pass through lowercased so they surface instead of dropping.
+- **Warm-window filter for social targets (LED-998)** — 72h window on X scans, 14d on reddit. Env-tunable via `DELIMIT_X_WARM_HOURS` and `DELIMIT_REDDIT_WARM_HOURS`. Fail-open on missing timestamps so parser bugs don't silently drop everything.
+- **X draft salvage (LED-997)** — `_try_trim_twitter_draft` trims LLM output at sentence boundary when it exceeds 3 sentences or 280 chars. Runs before the max-length check so a good-but-long draft becomes a good-and-short one instead of dying in the sanitizer. Proven live: salvaged a 626-char draft to 241 chars on the first post-deploy cycle.
+- **Reversible stale cleanup (LED-990)** — weekly systemd timer demotes blocked items to a cold lane after 30d instead of deleting. Ledger update restores cold → blocked/open with a single status flip. First-run safe with DRY_RUN=1.
+- **Warm-thread PR watcher (LED-989)** — 14-day warm window on outreach follow-ups; skip threads inactive longer than that. MAX_ACTIVE_THREADS=8 cap prevents dog-piling a single repository.
+- **Lemon Squeezy → Supabase reconciler (LED-996)** — trial watcher now polls LS every 6h and upserts subscription_status + role into the Supabase users table. Catches webhook drops without manual SQL intervention.
+- **ACTION_DENYLIST (LED-988)** — executor v2 gains an explicit denylist of prohibited action categories (money, legal/identity, credentials, deploy, contracts) that fires BEFORE the ACTION_SPEC whitelist check. Defense-in-depth against LLM-driven executor drift.
+- **Reddit residential-IP proxy (LED-987)** — scoped service bypasses 429s on reddit34.p.rapidapi.com by routing through a residential IP. Systemd-managed, auto-restart, rate-limited.
+- **propose_pr autonomous build primitive (LED-988)** — executor can propose PRs against an allowlisted repo set (`PROPOSE_PR_ALLOWED_REPOS`) with a fixed branch prefix (`delimit/`) and author (`delimit-bot`). Guarded by denylist + whitelist.
+
+### Fixed
+- **Exit-shim counter undercounting** — previously missed commits outside `SESSION_CWD` and dropped Z-suffixed timestamps; both now captured.
+- **Proprietary path leaks** — sync-gateway.sh EXCLUDE list hardened to keep Jamsons-portfolio-specific files (social.py, social_target.py, inbox_daemon.py, founding_users.py, deliberation.py) out of the npm bundle.
+
+### Tests
+- Gateway: 163/163 passing on changed-file tests (social.py, social_target.py, supabase_sync).
+- npm CLI: 134/134 passing (no CLI behavior changes — bundled gateway update).
+- Security audit: 0 real findings across gateway + UI (false positives only — test fixtures and TypeScript `token:` parameter types).
+
+### Notes
+- Companion dashboard changes at app.delimit.ai (LED-995 Billing + API Keys wiring, LED-997 Blocked drafts tab, LED-1008 venture chips + filters) shipped via delimit-ui/main.
+- Supabase migration 025 (venture TEXT column on 4 tables) applied separately via Management API.
+
 ## [4.1.53] - 2026-04-10
 
 ### Fixed (cycle engine — think→build→deploy)
