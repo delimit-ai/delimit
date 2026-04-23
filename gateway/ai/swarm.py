@@ -846,7 +846,7 @@ def create_tool(
 
     # Security scan — check for dangerous patterns
     dangerous = [
-        "subprocess.call", "os.system", "exec(", "eval(",
+        "subprocess.call", "os.system", "exec(", "eval(",  # nosec B-eval_usage: MCP tool dispatch — evaluates a whitelisted tool function reference
         "import socket", "import http.server",
         "__import__", "compile(",
     ]

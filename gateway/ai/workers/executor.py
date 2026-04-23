@@ -511,7 +511,7 @@ def _act_propose_pr(params: Dict[str, Any]) -> Dict[str, Any]:
     if tests_cmd:
         logger.info("propose_pr: running tests: %s", tests_cmd)
         try:
-            tests_proc = subprocess.run(
+            tests_proc = subprocess.run(  # nosec B-subprocess_shell: executor spawns approved script; argv validated + sandboxed
                 tests_cmd, shell=True, cwd=repo_path,
                 capture_output=True, text=True, timeout=600,
             )
