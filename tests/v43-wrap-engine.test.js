@@ -125,27 +125,33 @@ describe('v43 wrap: kill switch (--max-time)', () => {
     });
 
     it('emits a handoff_suggestion when the killed command maps to a known producer', async () => {
-        const result = await runWrap(['claude', '-p', 'this will not actually run'], {
+        // Use node itself as a long-running stand-in for the producer CLI (always available in CI).
+        // argv[0] must still match a known producer in suggestHandoff's table, so we use a wrapper
+        // script named like a producer via a symlink trick below, OR we test suggestHandoff directly.
+        // Simpler and portable: create a tiny shim executable named "claude" in the sandbox.
+        const shim = path.join(SANDBOX, 'claude');
+        fs.writeFileSync(shim, `#!/usr/bin/env node\nsetInterval(()=>{},1000);\n`);
+        fs.chmodSync(shim, 0o755);
+
+        const result = await runWrap([shim, '-p', 'this will not actually complete'], {
             cwd: SANDBOX,
             maxTimeSeconds: 1,
         });
-        // The wrapped claude binary may not exist on CI, but the kill logic + handoff logic still fire.
+
+        assert.equal(result.killed_by_timeout, true, 'the shim should run long enough to hit --max-time');
         const att = JSON.parse(fs.readFileSync(result.attestation_path, 'utf-8'));
         assert.equal(att.bundle.kind, 'liability_incident');
-        // handoff_suggestion only fires when killed_by_timeout; tolerant of binary-missing
-        if (result.killed_by_timeout) {
-            assert.ok(result.handoff_suggestion, 'handoff_suggestion must be present on kill');
-            assert.equal(result.handoff_suggestion.kill_source, 'claude');
-            assert.ok(
-                Array.isArray(result.handoff_suggestion.alternates) &&
-                result.handoff_suggestion.alternates.length >= 2,
-                'at least 2 alternate producers'
-            );
-            assert.ok(
-                result.handoff_suggestion.suggested_command.startsWith('delimit wrap --'),
-                'suggested_command must be a runnable delimit wrap invocation'
-            );
-        }
+        assert.ok(result.handoff_suggestion, 'handoff_suggestion must be present on kill');
+        assert.equal(result.handoff_suggestion.kill_source, 'claude');
+        assert.ok(
+            Array.isArray(result.handoff_suggestion.alternates) &&
+            result.handoff_suggestion.alternates.length >= 2,
+            'at least 2 alternate producers'
+        );
+        assert.ok(
+            result.handoff_suggestion.suggested_command.startsWith('delimit wrap --'),
+            'suggested_command must be a runnable delimit wrap invocation'
+        );
     });
 });
 

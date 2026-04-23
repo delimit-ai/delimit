@@ -357,7 +357,9 @@ def test_smoke(project_path: str, test_suite: Optional[str] = None) -> Dict[str,
     # If a specific suite is requested, validate and append
     if test_suite:
         # Sanitize: only allow alphanumeric, slashes, dots, underscores, hyphens, colons
-        import re
+        # LED-1077: removed redundant local `import re` — module imports re at the top,
+        # and the local import shadowed it, causing "local variable 're' referenced before assignment"
+        # on any code path that didn't pass through this branch before reaching re.search below.
         if not re.match(r'^[\w/.\-:*\[\]]+$', test_suite):
             return {"tool": "test.smoke", "status": "error", "error": f"Invalid test_suite: {test_suite}"}
         cmd_list.append(test_suite)
