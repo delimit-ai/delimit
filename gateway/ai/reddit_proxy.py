@@ -54,9 +54,10 @@ def fetch_subreddit(subreddit: str, sort: str = "new", limit: int = 10) -> List[
         try:
             fetch_url = f"{proxy_url}?url={urllib.parse.quote(reddit_url, safe='')}"
             headers = {"User-Agent": "Delimit/1.0"}
-            token = proxy_cfg.get("token", "")
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
+            # nosec B105 — reads proxy auth credential from config, not a hardcoded secret
+            auth_token = proxy_cfg.get("token", "")
+            if auth_token:
+                headers["Authorization"] = f"Bearer {auth_token}"
             req = urllib.request.Request(fetch_url, headers=headers)
             with urllib.request.urlopen(req, timeout=10) as resp:
                 body = json.loads(resp.read().decode())
@@ -100,9 +101,10 @@ def fetch_thread(thread_id: str) -> Optional[Dict[str, Any]]:
         try:
             fetch_url = f"{proxy_url}?url={urllib.parse.quote(reddit_url, safe='')}"
             headers = {"User-Agent": "Delimit/1.0"}
-            token = proxy_cfg.get("token", "")
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
+            # nosec B105 — reads proxy auth credential from config, not a hardcoded secret
+            auth_token = proxy_cfg.get("token", "")
+            if auth_token:
+                headers["Authorization"] = f"Bearer {auth_token}"
             req = urllib.request.Request(fetch_url, headers=headers)
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode())
