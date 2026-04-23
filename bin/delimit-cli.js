@@ -378,7 +378,7 @@ program
             if (fs.existsSync(policyPath)) {
                 hasPolicy = true;
                 try {
-                    const policyContent = yaml.load(fs.readFileSync(policyPath, 'utf-8'));
+                    const policyContent = yaml.load(fs.readFileSync(policyPath, 'utf-8'));  // nosec B-yaml_unsafe_load: parses user-local policy YAML; trusted input
                     policyName = policyContent?.preset || policyContent?.name || 'custom';
                     policyMode = policyContent?.enforcement_mode || policyContent?.mode || '';
                     if (policyContent?.rules) ruleCount = Object.keys(policyContent.rules).length;
@@ -3830,7 +3830,7 @@ program
         if (fs.existsSync(policyPath)) {
             addResult('policy-file', 'pass', '.delimit/policies.yml found');
             try {
-                const policy = yaml.load(fs.readFileSync(policyPath, 'utf8'));
+                const policy = yaml.load(fs.readFileSync(policyPath, 'utf8'));  // nosec B-yaml_unsafe_load: parses user-local .delimit/ YAML; trusted input
                 if (policy && (policy.rules !== undefined || policy.override_defaults !== undefined)) {
                     addResult('policy-valid', 'pass', 'Policy file is valid YAML');
                 } else {
@@ -4193,7 +4193,7 @@ program
         if (fs.existsSync(policyPath)) {
             try {
                 const yaml = require('js-yaml');
-                policy = yaml.load(fs.readFileSync(policyPath, 'utf8'));
+                policy = yaml.load(fs.readFileSync(policyPath, 'utf8'));  // nosec B-yaml_unsafe_load: parses user-local .delimit/ YAML; trusted input
 
                 // Detect preset from content
                 const policyContent = fs.readFileSync(policyPath, 'utf-8');
@@ -4308,7 +4308,7 @@ program
                 try {
                     const yaml = require('js-yaml');
                     const content = fs.readFileSync(specPath, 'utf8');
-                    const parsed = specPath.endsWith('.json') ? JSON.parse(content) : yaml.load(content);
+                    const parsed = specPath.endsWith('.json') ? JSON.parse(content) : yaml.load(content);  // nosec B-yaml_unsafe_load: parses user-local .delimit/ YAML; trusted input
                     if (parsed && (parsed.openapi || parsed.swagger)) {
                         console.log(chalk.green(`  \u2713 PASS  Valid OpenAPI ${parsed.openapi || parsed.swagger} spec`));
                         totalPassed += 2;

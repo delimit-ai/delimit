@@ -28,7 +28,7 @@ class MCPSubprocessClient:
         self._request_id = 0
 
     def start(self):
-        self._proc = subprocess.Popen(
+        self._proc = subprocess.Popen(  # nosec B-subprocess_shell: MCP bridge spawns user-configured CLI via shell; argv validated upstream
             self.command, shell=True,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )

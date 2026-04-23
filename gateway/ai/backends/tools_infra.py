@@ -75,10 +75,10 @@ _CREDENTIAL_FALSE_POSITIVES = re.compile(
 
 # Dangerous code patterns: name -> (regex, description, severity)
 ANTI_PATTERNS = {
-    "eval_usage": (r"\beval\s*\(", "Use of eval() — potential code injection", "high"),
-    "exec_usage": (r"\bexec\s*\(", "Use of exec() — potential code injection", "high"),
+    "eval_usage": (r"\beval\s*\(", "Use of eval() — potential code injection", "high"),  # nosec B-eval_usage: regex-pattern DEFINITION string (not runtime eval)
+    "exec_usage": (r"\bexec\s*\(", "Use of exec() — potential code injection", "high"),  # nosec B-exec_usage: regex-pattern DEFINITION string (not runtime exec)
     "sql_concat": (r"""(?:execute|cursor\.execute|query)\s*\(\s*(?:f['\"]|['\"].*%s|.*\+\s*['\"])""", "SQL string concatenation — potential SQL injection", "critical"),
-    "dangerous_innerHTML": (r"dangerouslySetInnerHTML", "dangerouslySetInnerHTML — potential XSS", "high"),
+    "dangerous_innerHTML": (r"dangerouslySetInnerHTML", "dangerouslySetInnerHTML — potential XSS", "high"),  # nosec B-dangerous_innerHTML: regex-pattern DEFINITION string
     "subprocess_shell": (r"subprocess\.\w+\([^)]*shell\s*=\s*True", "subprocess with shell=True — potential command injection", "medium"),
     "pickle_load": (r"pickle\.loads?\(", "pickle.load — potential arbitrary code execution", "high"),
     "yaml_unsafe_load": (r"yaml\.load\([^)]*(?!Loader)", "yaml.load without safe Loader", "medium"),
@@ -309,10 +309,17 @@ def security_audit(target: str = ".") -> Dict[str, Any]:
                 })
                 severity_counts["critical"] += 1
 
-        # Anti-pattern detection
+        # Anti-pattern detection with industry-standard suppression markers.
+        # Skip a match if the matched line contains `# nosec`, `// nosec`,
+        # `# delimit:nosec`, or `// delimit:nosec` (anywhere on that line).
+        # This matches bandit's convention for Python and is widely understood.
+        content_lines = content.splitlines()
         for ap_name, (pattern, desc, sev) in ANTI_PATTERNS.items():
             for match in re.finditer(pattern, content):
                 line_num = content[:match.start()].count("\n") + 1
+                line_text = content_lines[line_num - 1] if 0 < line_num <= len(content_lines) else ""
+                if re.search(r"(#|//)\s*(delimit:)?nosec\b", line_text):
+                    continue
                 anti_patterns_found.append({
                     "file": rel,
                     "line": line_num,
