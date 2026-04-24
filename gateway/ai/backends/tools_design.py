@@ -70,30 +70,111 @@ def _read_text(path: Path, limit: int = 200_000) -> str:
 _CSS_VAR_RE = re.compile(r"--([a-zA-Z0-9_-]+)\s*:\s*([^;]+);")
 _MEDIA_QUERY_RE = re.compile(r"@media[^{]*\(\s*(?:min|max)-width\s*:\s*([^)]+)\)")
 
+# LED-1010: selector-aware extraction. Captures the selector (e.g. `:root`,
+# `.dark`, `[data-theme="dark"]`) that owns each custom property block so
+# light/dark variants of the same token name don't silently dedupe into one.
+_CSS_BLOCK_RE = re.compile(
+    r"(?P<selector>[^{}@\n][^{}]{0,200})\{(?P<body>[^{}]*)\}",
+    re.DOTALL,
+)
 
-def _extract_css_variables(text: str) -> Dict[str, List[Dict[str, str]]]:
-    """Extract CSS custom properties grouped by category."""
+
+def _mode_from_selector(selector: str) -> str:
+    """Best-effort mode guess from a CSS selector: 'dark' / 'light' / 'base'."""
+    s = selector.strip().lower()
+    if any(t in s for t in (".dark", "[data-theme=\"dark\"]", "[data-mode=\"dark\"]", "prefers-color-scheme: dark")):
+        return "dark"
+    if any(t in s for t in (".light", "[data-theme=\"light\"]", "[data-mode=\"light\"]", "prefers-color-scheme: light")):
+        return "light"
+    if s in (":root", "html", "body", "*"):
+        return "base"
+    return "scoped"
+
+
+# LED-1010: common domain/semantic token prefixes. Anything starting with these
+# reads as application-meaning rather than theme-primitive, and belongs in the
+# `semantic` bucket, not `other`. Downstream generators need this split to know
+# which tokens are safe to remap vs which carry app meaning.
+_SEMANTIC_PREFIXES = (
+    "score-", "status-", "blur-", "price-", "rank-", "tier-", "risk-",
+    "badge-", "level-", "alert-",
+)
+
+
+def _token_taxonomy(name: str) -> str:
+    """Classify a token name as primitive | semantic | other."""
+    n = name.lower().lstrip("-")
+    if any(n.startswith(p) for p in _SEMANTIC_PREFIXES):
+        return "semantic"
+    # Core theme primitives
+    if any(n.startswith(p) for p in (
+        "color-", "bg-", "text-", "border-", "fill-", "stroke-",
+        "accent", "primary", "secondary", "muted", "foreground",
+        "background", "surface", "ring-", "input-",
+        "space-", "spacing-", "gap-", "size-", "radius-",
+        "font-", "leading-", "tracking-",
+    )):
+        return "primitive"
+    return "other"
+
+
+def _extract_css_variables(text: str, source: str = "") -> Dict[str, List[Dict[str, str]]]:
+    """Extract CSS custom properties grouped by category.
+
+    LED-1010: now selector-aware. Each returned entry carries `selector`
+    (the CSS rule it was declared in), `mode` (dark/light/base/scoped), and
+    `taxonomy` (primitive/semantic/other) so consumers can tell
+    `--bg-base` in `:root` from `--bg-base` in `.dark`.
+    """
     colors: List[Dict[str, str]] = []
     spacing: List[Dict[str, str]] = []
     typography: List[Dict[str, str]] = []
     other: List[Dict[str, str]] = []
+    semantic: List[Dict[str, str]] = []
 
-    for name, value in _CSS_VAR_RE.findall(text):
-        value = value.strip()
-        entry = {"name": f"--{name}", "value": value}
-        lower = name.lower()
-        if any(k in lower for k in ("color", "bg", "text", "border", "fill", "stroke", "accent", "primary", "secondary")):
-            colors.append(entry)
-        elif any(k in lower for k in ("space", "gap", "margin", "padding", "size", "width", "height", "radius")):
-            spacing.append(entry)
-        elif any(k in lower for k in ("font", "line", "letter", "text", "heading")):
-            typography.append(entry)
-        elif _is_color_value(value):
-            colors.append(entry)
-        else:
-            other.append(entry)
+    # Walk each CSS rule block so we know which selector owns each declaration.
+    for m in _CSS_BLOCK_RE.finditer(text):
+        selector = m.group("selector").strip()
+        mode = _mode_from_selector(selector)
+        body = m.group("body")
+        for name, value in _CSS_VAR_RE.findall(body):
+            value = value.strip()
+            taxonomy = _token_taxonomy(name)
+            entry = {
+                "name": f"--{name}",
+                "value": value,
+                "selector": selector,
+                "mode": mode,
+                "taxonomy": taxonomy,
+            }
+            if source:
+                entry["source"] = source
+            lower = name.lower()
 
-    return {"colors": colors, "spacing": spacing, "typography": typography, "other": other}
+            # Semantic tokens bypass the keyword bucket: they carry app meaning
+            # and should be routed to the semantic bucket regardless of value type.
+            if taxonomy == "semantic":
+                semantic.append(entry)
+                continue
+
+            if any(k in lower for k in ("color", "bg", "text", "border", "fill", "stroke", "accent", "primary", "secondary", "surface", "foreground", "background", "ring")):
+                colors.append(entry)
+            elif any(k in lower for k in ("space", "gap", "margin", "padding", "size", "width", "height", "radius")):
+                spacing.append(entry)
+            elif any(k in lower for k in ("font", "line", "letter", "text", "heading", "leading", "tracking")):
+                typography.append(entry)
+            elif _is_color_value(value):
+                colors.append(entry)
+            else:
+                other.append(entry)
+
+    return {
+        "colors": colors,
+        "spacing": spacing,
+        "typography": typography,
+        "other": other,
+        "semantic": semantic,
+    }
 
 
 def _is_color_value(v: str) -> bool:
@@ -126,6 +207,127 @@ def _parse_tailwind_config(text: str) -> Dict[str, Any]:
             breakpoints.append(bp_match.group(1))
 
     return {"colors_count": colors_count, "spacing_count": spacing_count, "breakpoints": breakpoints}
+
+
+# ---------------------------------------------------------------------------
+# LED-1010: Tailwind-awareness helpers
+# ---------------------------------------------------------------------------
+
+# Tailwind ships an opinionated default scale. When a repo has tailwind.config.js
+# and doesn't override these, the framework defaults are the design tokens in
+# use — `extract_tokens` previously reported 0 for each because it only scanned
+# CSS `--*` variables.
+TAILWIND_DEFAULT_BREAKPOINTS = ["sm=640px", "md=768px", "lg=1024px", "xl=1280px", "2xl=1536px"]
+TAILWIND_DEFAULT_SPACING = [
+    "0=0px", "px=1px", "0.5=0.125rem", "1=0.25rem", "1.5=0.375rem", "2=0.5rem",
+    "2.5=0.625rem", "3=0.75rem", "3.5=0.875rem", "4=1rem", "5=1.25rem", "6=1.5rem",
+    "7=1.75rem", "8=2rem", "9=2.25rem", "10=2.5rem", "11=2.75rem", "12=3rem",
+    "14=3.5rem", "16=4rem", "20=5rem", "24=6rem", "28=7rem", "32=8rem", "36=9rem",
+    "40=10rem", "44=11rem", "48=12rem", "52=13rem", "56=14rem", "60=15rem",
+    "64=16rem", "72=18rem", "80=20rem", "96=24rem",
+]
+TAILWIND_DEFAULT_FONT_SIZES = [
+    "text-xs=0.75rem", "text-sm=0.875rem", "text-base=1rem", "text-lg=1.125rem",
+    "text-xl=1.25rem", "text-2xl=1.5rem", "text-3xl=1.875rem", "text-4xl=2.25rem",
+    "text-5xl=3rem", "text-6xl=3.75rem", "text-7xl=4.5rem", "text-8xl=6rem",
+    "text-9xl=8rem",
+]
+
+# Responsive prefix regex. Matches `sm:`, `md:`, `lg:`, `xl:`, `2xl:` in a
+# JSX className/string context. Tailwind is mobile-first by default: these
+# prefixes apply at and above the named breakpoint.
+_TAILWIND_RESPONSIVE_PREFIX_RE = re.compile(r"(?<![\w-])(sm|md|lg|xl|2xl):[\w\[\]-]+", re.IGNORECASE)
+
+# Dark-mode class usage in JSX: `dark:bg-black` etc.
+_TAILWIND_DARK_PREFIX_RE = re.compile(r"(?<![\w-])dark:[\w\[\]-]+")
+
+# Tailwind spacing/layout utility class usage — rough counter for the
+# responsive_units_count signal.
+_TAILWIND_UTILITY_RE = re.compile(
+    r"(?<![\w-])(?:w|h|m|p|mx|my|mt|mb|ml|mr|px|py|pt|pb|pl|pr|gap|space|"
+    r"max-w|min-w|max-h|min-h|inset|top|bottom|left|right|z|grid-cols|col-span)"
+    r"-[\w./\[\]%-]+"
+)
+
+
+def _has_tailwind_config(root: Path) -> Optional[Path]:
+    """Return the first found tailwind.config.{js,ts,mjs,cjs} or None."""
+    for tw_name in ("tailwind.config.js", "tailwind.config.ts", "tailwind.config.mjs", "tailwind.config.cjs"):
+        tw_path = root / tw_name
+        if tw_path.exists():
+            return tw_path
+    # Tailwind v4 uses @import "tailwindcss" in CSS with no separate config
+    return None
+
+
+def _detect_tailwind_v4(root: Path) -> bool:
+    """Detect Tailwind v4 (no config file, uses @import "tailwindcss" in CSS)."""
+    for cf in list(root.rglob("*.css"))[:20]:
+        try:
+            text = cf.read_text(errors="replace")[:5000]
+            if '@import "tailwindcss"' in text or "@import 'tailwindcss'" in text:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _scan_tailwind_utilities(root: Path) -> Dict[str, Any]:
+    """Scan JSX/TSX/Vue/Svelte files for Tailwind utility class usage.
+
+    Returns counts of responsive-prefixed classes, dark-prefix classes,
+    and general utility classes — what the old validate_responsive missed
+    entirely when it only looked at raw CSS.
+    """
+    component_files = _find_files(root, [".tsx", ".jsx", ".ts", ".js", ".vue", ".svelte", ".html"])
+    responsive_hits = 0
+    dark_hits = 0
+    utility_hits = 0
+    breakpoints_seen: set = set()
+    files_with_utilities = 0
+    # Cap to keep runtime bounded on huge monorepos
+    for cf in component_files[:500]:
+        text = _read_text(cf, limit=200_000)
+        if not text:
+            continue
+        # Require a Tailwind signal before counting (otherwise every JS file
+        # matches via collisions like `py-pi`)
+        if "className" not in text and "class=" not in text and "tw`" not in text:
+            continue
+        file_had_utility = False
+        for m in _TAILWIND_RESPONSIVE_PREFIX_RE.finditer(text):
+            responsive_hits += 1
+            breakpoints_seen.add(m.group(1).lower())
+            file_had_utility = True
+        dark_hits += len(_TAILWIND_DARK_PREFIX_RE.findall(text))
+        for m in _TAILWIND_UTILITY_RE.finditer(text):
+            utility_hits += 1
+            file_had_utility = True
+        if file_had_utility:
+            files_with_utilities += 1
+    return {
+        "responsive_prefix_count": responsive_hits,
+        "dark_prefix_count": dark_hits,
+        "utility_count": utility_hits,
+        "files_with_utilities": files_with_utilities,
+        "files_scanned": len(component_files),
+        "breakpoints_seen": sorted(breakpoints_seen, key=lambda b: ["sm", "md", "lg", "xl", "2xl"].index(b) if b in ["sm", "md", "lg", "xl", "2xl"] else 99),
+    }
+
+
+# ---------------------------------------------------------------------------
+# LED-1010: status taxonomy
+# ---------------------------------------------------------------------------
+# Consumers branch on `status` to decide whether to gate CI. A tool that
+# returns `ok` while producing partial/wrong results is a silent failure —
+# the biggest gap identified by the 2026-04-24 pilot run. These constants
+# define the explicit vocabulary.
+
+STATUS_OK = "ok"                          # all checks ran, no gaps
+STATUS_DEGRADED = "degraded"              # ran, but known gaps (e.g. only CSS scanned, not JSX)
+STATUS_PARTIAL_COVERAGE = "partial_coverage"  # ran a subset of the requested standard
+STATUS_TOOLCHAIN_MISSING = "toolchain_missing"  # required external tool absent
+STATUS_ERROR = "error"                    # unrecoverable
 
 
 # ---------------------------------------------------------------------------
@@ -209,61 +411,139 @@ def design_extract_tokens(
     if not root.is_dir():
         return {"tool": "design.extract_tokens", "error": f"Directory not found: {root}"}
 
-    all_tokens: Dict[str, List] = {"colors": [], "spacing": [], "typography": [], "breakpoints": [], "other": []}
+    all_tokens: Dict[str, List] = {
+        "colors": [], "spacing": [], "typography": [], "breakpoints": [],
+        "other": [], "semantic": [],
+    }
     source_files: List[str] = []
+    coverage: Dict[str, Any] = {
+        "css_scanned": False,
+        "tailwind_config_found": False,
+        "tailwind_v4_detected": False,
+        "tailwind_defaults_emitted": False,
+        "selector_aware": True,
+        "semantic_taxonomy": True,
+    }
+    gaps: List[str] = []
 
-    # 1. Tailwind config
-    for tw_name in ("tailwind.config.js", "tailwind.config.ts", "tailwind.config.mjs", "tailwind.config.cjs"):
-        tw_path = root / tw_name
-        if tw_path.exists():
-            text = _read_text(tw_path)
-            parsed = _parse_tailwind_config(text)
-            source_files.append(str(tw_path))
-            if parsed["breakpoints"]:
-                all_tokens["breakpoints"].extend(
-                    [{"name": bp, "source": str(tw_path)} for bp in parsed["breakpoints"]]
-                )
-            break
+    # 1. Tailwind config (LED-1010: emit framework defaults when present)
+    tw_path = _has_tailwind_config(root)
+    tw_v4 = False
+    tw_config_text = ""
+    if tw_path:
+        coverage["tailwind_config_found"] = True
+        tw_config_text = _read_text(tw_path)
+        parsed = _parse_tailwind_config(tw_config_text)
+        source_files.append(str(tw_path))
+        # User-defined breakpoints override defaults
+        if parsed["breakpoints"]:
+            all_tokens["breakpoints"].extend(
+                [{"name": bp, "source": str(tw_path), "origin": "tailwind_config"} for bp in parsed["breakpoints"]]
+            )
+    else:
+        tw_v4 = _detect_tailwind_v4(root)
+        coverage["tailwind_v4_detected"] = tw_v4
 
-    # 2. CSS / SCSS files
+    # If Tailwind is in play at all, surface the framework's default token
+    # scales so downstream consumers can see what utility classes reference.
+    # Previously these returned zero and the caller couldn't tell if the
+    # design system was truly empty or just invisible to us.
+    if tw_path or tw_v4:
+        coverage["tailwind_defaults_emitted"] = True
+        framework_source = str(tw_path) if tw_path else "tailwind-v4 (@import)"
+
+        # Emit defaults only when user config didn't already cover them
+        if not all_tokens["breakpoints"]:
+            for bp_def in TAILWIND_DEFAULT_BREAKPOINTS:
+                name, value = bp_def.split("=", 1)
+                all_tokens["breakpoints"].append({
+                    "name": name, "value": value, "source": framework_source,
+                    "origin": "tailwind_default",
+                })
+
+        for sp_def in TAILWIND_DEFAULT_SPACING:
+            name, value = sp_def.split("=", 1)
+            all_tokens["spacing"].append({
+                "name": f"spacing.{name}", "value": value, "source": framework_source,
+                "origin": "tailwind_default", "taxonomy": "primitive",
+            })
+
+        for fs_def in TAILWIND_DEFAULT_FONT_SIZES:
+            name, value = fs_def.split("=", 1)
+            all_tokens["typography"].append({
+                "name": name, "value": value, "source": framework_source,
+                "origin": "tailwind_default", "taxonomy": "primitive",
+            })
+
+    # 2. CSS / SCSS files (now selector-aware via _extract_css_variables)
     css_files = _find_files(root, [".css", ".scss", ".sass"])
     for cf in css_files:
         text = _read_text(cf)
         if "--" not in text and "@media" not in text:
             continue
         source_files.append(str(cf))
-        vars_found = _extract_css_variables(text)
-        for cat in ("colors", "spacing", "typography", "other"):
-            for entry in vars_found[cat]:
-                entry["source"] = str(cf)
-                all_tokens[cat].append(entry)
+        coverage["css_scanned"] = True
+        vars_found = _extract_css_variables(text, source=str(cf))
+        for cat in ("colors", "spacing", "typography", "other", "semantic"):
+            all_tokens[cat].extend(vars_found.get(cat, []))
 
-        # breakpoints from media queries
+        # breakpoints from media queries (user-authored, origin=css_media)
         for bp_val in _MEDIA_QUERY_RE.findall(text):
-            all_tokens["breakpoints"].append({"value": bp_val.strip(), "source": str(cf)})
+            all_tokens["breakpoints"].append({
+                "value": bp_val.strip(), "source": str(cf),
+                "origin": "css_media",
+            })
 
     # 3. Filter by token_types if specified
     if token_types:
         all_tokens = {k: v for k, v in all_tokens.items() if k in token_types}
 
-    # Deduplicate breakpoints
-    seen_bp = set()
-    unique_bp = []
+    # LED-1010 dark-mode dedup: collapse (name, mode) duplicates rather than
+    # eliding mode altogether. A token with the same name in `:root` and
+    # `.dark` is one logical token with two values — surface both.
+    for cat in ("colors", "spacing", "typography", "other", "semantic"):
+        if cat not in all_tokens:
+            continue
+        seen: Dict[tuple, Dict] = {}
+        for entry in all_tokens[cat]:
+            key = (entry.get("name", ""), entry.get("mode", ""))
+            if key in seen:
+                continue
+            seen[key] = entry
+        all_tokens[cat] = list(seen.values())
+
+    # Breakpoint dedup by (name|value, origin)
+    seen_bp: set = set()
+    unique_bp: List[Dict[str, Any]] = []
     for bp in all_tokens.get("breakpoints", []):
-        key = bp.get("name", bp.get("value", ""))
-        if key not in seen_bp:
-            seen_bp.add(key)
-            unique_bp.append(bp)
+        key = (bp.get("name", bp.get("value", "")), bp.get("origin", ""))
+        if key in seen_bp:
+            continue
+        seen_bp.add(key)
+        unique_bp.append(bp)
     if "breakpoints" in all_tokens:
         all_tokens["breakpoints"] = unique_bp
 
-    total = sum(len(v) for v in all_tokens.values())
+    # Coverage gaps → status taxonomy (LED-1010)
+    if not coverage["css_scanned"] and not (tw_path or tw_v4):
+        gaps.append("No CSS variables and no Tailwind config found — project may not use standard design tokens")
+    if (tw_path or tw_v4) and not coverage["css_scanned"]:
+        gaps.append("Tailwind detected but no user CSS variables found — only framework defaults emitted")
+
+    if gaps:
+        status = STATUS_PARTIAL_COVERAGE
+    else:
+        status = STATUS_OK
+
+    total = sum(len(v) for v in all_tokens.values() if isinstance(v, list))
     result = {
         "tool": "design.extract_tokens",
-        "status": "ok",
+        "status": status,
         "tokens": all_tokens,
         "total_tokens": total,
         "source_files": sorted(set(source_files)),
+        "coverage": coverage,
+        "gaps": gaps,
         "figma_used": False,
     }
     # If user passed a figma_file_key but no token is available, add a hint
@@ -496,7 +776,13 @@ def design_validate_responsive(
     project_path: str,
     check_types: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Validate responsive design patterns via static analysis (Playwright optional)."""
+    """Validate responsive design patterns via static analysis.
+
+    LED-1010: now Tailwind-aware. Scans JSX/TSX/Vue/Svelte for utility-class
+    responsive prefixes (sm:/md:/lg:/xl:/2xl:) in addition to @media CSS.
+    Tailwind is mobile-first by default; previously the tool reported
+    `mobile_first: false` on any Tailwind-only codebase, which was wrong.
+    """
     root = Path(project_path)
     if not root.is_dir():
         return {"tool": "design.validate_responsive", "error": f"Directory not found: {root}"}
@@ -504,14 +790,23 @@ def design_validate_responsive(
     issues: List[Dict[str, str]] = []
     breakpoints_found: List[str] = []
     viewport_meta = False
+    viewport_blocks_zoom = False
     responsive_units_count = 0
+    coverage: Dict[str, Any] = {
+        "css_scanned": False,
+        "jsx_scanned": False,
+        "tailwind_detected": False,
+    }
 
     # Scan HTML files for viewport meta
     html_files = _find_files(root, [".html", ".htm"])
     for hf in html_files:
         text = _read_text(hf)
-        if _VIEWPORT_META_RE.search(text):
+        m = _VIEWPORT_META_RE.search(text)
+        if m:
             viewport_meta = True
+            if "maximum-scale" in m.group() or "user-scalable=no" in m.group():
+                viewport_blocks_zoom = True
             break
 
     # Also check Next.js layout files
@@ -522,6 +817,8 @@ def design_validate_responsive(
                 text = _read_text(c)
                 if "viewport" in text.lower():
                     viewport_meta = True
+                    if "maximum-scale" in text.lower() or "userScalable: false" in text:
+                        viewport_blocks_zoom = True
                     break
             if viewport_meta:
                 break
@@ -529,10 +826,20 @@ def design_validate_responsive(
     if not viewport_meta:
         issues.append({"severity": "warning", "message": "No viewport meta tag detected", "fix": "Add <meta name='viewport' content='width=device-width, initial-scale=1'>"})
 
+    # LED-1010: WCAG2AA (1.4.4) — zoom-blocking viewport
+    if viewport_meta and viewport_blocks_zoom:
+        issues.append({
+            "severity": "error",
+            "message": "Viewport blocks user zoom (maximum-scale=1 or user-scalable=no) — WCAG 1.4.4 violation",
+            "fix": "Remove maximum-scale and user-scalable restrictions so users can zoom to 200%",
+        })
+
     # Scan CSS for media queries and responsive patterns
     css_files = _find_files(root, [".css", ".scss", ".sass"])
     for cf in css_files:
         text = _read_text(cf)
+        if text:
+            coverage["css_scanned"] = True
         for bp_val in _MEDIA_QUERY_RE.findall(text):
             bp_val = bp_val.strip()
             if bp_val not in breakpoints_found:
@@ -547,6 +854,39 @@ def design_validate_responsive(
         min_width_count += len(re.findall(r"min-width\s*:", text))
         max_width_count += len(re.findall(r"max-width\s*:", text))
 
+    # LED-1010: Tailwind utility class scan. The old mobile_first heuristic
+    # only considered raw CSS and returned `false` on any Tailwind codebase.
+    # Tailwind prefixes (sm:/md:/...) are mobile-first by design: they apply
+    # AT OR ABOVE the named breakpoint.
+    tw_path = _has_tailwind_config(root)
+    tw_v4 = False if tw_path else _detect_tailwind_v4(root)
+    coverage["tailwind_detected"] = bool(tw_path or tw_v4)
+
+    tw_stats: Dict[str, Any] = {}
+    if coverage["tailwind_detected"]:
+        tw_stats = _scan_tailwind_utilities(root)
+        coverage["jsx_scanned"] = tw_stats.get("files_scanned", 0) > 0
+
+        # Add Tailwind default breakpoints that were actually USED in the codebase
+        for bp in tw_stats.get("breakpoints_seen", []):
+            bp_label = f"tailwind:{bp}"
+            if bp_label not in breakpoints_found:
+                breakpoints_found.append(bp_label)
+
+        # Utility classes count as responsive units (layout-responsive classes
+        # like w-full/h-screen/max-w-*)
+        responsive_units_count += tw_stats.get("utility_count", 0)
+
+    # Determine mobile_first. Tailwind prefixes → mobile-first. Raw CSS: prefer
+    # min-width over max-width.
+    if coverage["tailwind_detected"] and tw_stats.get("responsive_prefix_count", 0) > 0:
+        mobile_first = True
+    elif min_width_count == 0 and max_width_count == 0:
+        # No explicit breakpoints at all — don't claim mobile_first either way
+        mobile_first = None
+    else:
+        mobile_first = min_width_count >= max_width_count
+
     if max_width_count > min_width_count * 2 and max_width_count > 3:
         issues.append({
             "severity": "info",
@@ -554,9 +894,7 @@ def design_validate_responsive(
             "fix": "Consider mobile-first approach using min-width media queries",
         })
 
-    if not breakpoints_found and not any(
-        (root / n).exists() for n in ("tailwind.config.js", "tailwind.config.ts", "tailwind.config.mjs")
-    ):
+    if not breakpoints_found and not coverage["tailwind_detected"]:
         issues.append({
             "severity": "warning",
             "message": "No CSS breakpoints or Tailwind config detected",
@@ -574,15 +912,30 @@ def design_validate_responsive(
                 "fix": "Use max-width or responsive units instead",
             })
 
-    return {
+    # Status taxonomy (LED-1010)
+    gaps: List[str] = []
+    if coverage["tailwind_detected"] and not coverage["jsx_scanned"]:
+        gaps.append("Tailwind detected but no JSX/TSX/Vue/Svelte files found — responsive coverage may be underreported")
+    if not coverage["css_scanned"] and not coverage["tailwind_detected"]:
+        gaps.append("No CSS and no Tailwind detected — nothing to validate against")
+
+    status = STATUS_PARTIAL_COVERAGE if gaps else STATUS_OK
+
+    result = {
         "tool": "design.validate_responsive",
-        "status": "ok",
+        "status": status,
         "breakpoints_found": breakpoints_found,
         "responsive_issues": issues,
         "viewport_meta": viewport_meta,
+        "viewport_blocks_zoom": viewport_blocks_zoom,
         "responsive_units_count": responsive_units_count,
-        "mobile_first": min_width_count >= max_width_count,
+        "mobile_first": mobile_first,
+        "coverage": coverage,
+        "gaps": gaps,
     }
+    if tw_stats:
+        result["tailwind_stats"] = tw_stats
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -764,11 +1117,31 @@ def _puppeteer_screenshot_fallback(url: str, baselines_dir: Path) -> Dict[str, A
             timeout=30,
         )
         if result.returncode != 0:
+            stderr = result.stderr.decode(errors="replace")[:500]
+            # LED-1010: distinguish "module not found" (toolchain missing) from
+            # runtime errors (toolchain present but failed). Consumers need
+            # this distinction to know whether to install or debug.
+            if "Cannot find module 'puppeteer'" in stderr or "Error: Cannot find module" in stderr:
+                return {
+                    "tool": "story.visual_test",
+                    "status": STATUS_TOOLCHAIN_MISSING,
+                    "missing": ["puppeteer", "playwright"],
+                    "error": stderr,
+                    "install_commands": [
+                        "pip install playwright && python -m playwright install chromium",
+                        "npm install -g puppeteer",
+                    ],
+                    "hint": (
+                        "No screenshot engine available. Install Playwright (preferred) "
+                        "or Puppeteer. After install, re-run — the tool auto-detects."
+                    ),
+                }
             return {
                 "tool": "story.visual_test",
-                "status": "puppeteer_error",
-                "error": result.stderr.decode(errors="replace")[:500],
-                "hint": "Puppeteer fallback failed. Install Playwright for better support: pip install playwright && python -m playwright install chromium",
+                "status": "error",
+                "engine": "puppeteer",
+                "error": stderr,
+                "hint": "Puppeteer is installed but the screenshot call failed at runtime. Check the URL reachability, sandbox permissions, or memory limits.",
             }
 
         return {
@@ -813,9 +1186,14 @@ def story_visual_test(
 
         return {
             "tool": "story.visual_test",
-            "status": "no_screenshot_tool",
+            "status": STATUS_TOOLCHAIN_MISSING,
+            "missing": ["playwright", "puppeteer"],
+            "install_commands": [
+                "pip install playwright && python -m playwright install chromium",
+                "npm install -g puppeteer",
+            ],
             "message": (
-                "No screenshot tool available. Install one of the following:\n"
+                "No screenshot engine available. Install one:\n"
                 "  - Playwright (recommended): pip install playwright && python -m playwright install chromium\n"
                 "  - Puppeteer (fallback): npm install -g puppeteer"
             ),
@@ -909,19 +1287,76 @@ def story_visual_test(
 # 26. story_accessibility
 # ---------------------------------------------------------------------------
 
-_IMG_NO_ALT_RE = re.compile(r"<img(?![^>]*alt=)[^>]*>", re.IGNORECASE)
-_INPUT_NO_LABEL_RE = re.compile(r"<input(?![^>]*(?:aria-label|aria-labelledby|id=)[^>]*>)[^>]*>", re.IGNORECASE)
-_BUTTON_EMPTY_RE = re.compile(r"<button[^>]*>\s*</button>", re.IGNORECASE)
-_A_NO_HREF_RE = re.compile(r"<a(?![^>]*href=)[^>]*>", re.IGNORECASE)
-_HEADING_SKIP_RE = re.compile(r"<h([1-6])")
-_ARIA_HIDDEN_FOCUSABLE_RE = re.compile(r'aria-hidden=["\']true["\'][^>]*(?:tabindex=["\']0["\']|<button|<a\s)', re.IGNORECASE)
+# LED-1010 FIX: the original patterns used `<tag` with re.IGNORECASE but no
+# word boundary after the tag name. That meant `<ArrowLeft>` matched `<a` +
+# `rrowLeft>`, producing 128 false-positive link-href "errors" on a single
+# DomainVested scan. Require the character AFTER the tag name to be
+# whitespace, `/`, or `>` so PascalCase React components can't collide with
+# HTML anchors / images / inputs / buttons.
+_IMG_NO_ALT_RE = re.compile(r"<img(?=[\s/>])(?![^>]*\salt=)[^>]*>", re.IGNORECASE)
+_INPUT_NO_LABEL_RE = re.compile(r"<input(?=[\s/>])(?![^>]*(?:\saria-label|\saria-labelledby|\sid=|type=[\"']hidden[\"']))[^>]*>", re.IGNORECASE)
+_BUTTON_EMPTY_RE = re.compile(r"<button(?=[\s>])[^>]*>\s*</button>", re.IGNORECASE)
+_A_NO_HREF_RE = re.compile(r"<a(?=[\s/>])(?![^>]*\shref=)[^>]*>", re.IGNORECASE)
+_HEADING_SKIP_RE = re.compile(r"<h([1-6])(?=[\s/>])")
+_ARIA_HIDDEN_FOCUSABLE_RE = re.compile(r'aria-hidden=["\']true["\'][^>]*(?:tabindex=["\']0["\']|<button(?=[\s>])|<a(?=[\s>]))', re.IGNORECASE)
+
+
+# LED-1010: WCAG coverage map. The old tool accepted standards="WCAG2AA"
+# but only implemented 3 of ~50 AA rules, and stamped every issue "WCAG2A"
+# regardless. This map declares exactly which rules the scanner covers so
+# the response can surface `coverage` honestly and `standard_requested` vs
+# `standard_implemented` are separate fields.
+#
+# Source references per rule: https://www.w3.org/WAI/WCAG21/quickref/
+IMPLEMENTED_WCAG_RULES = {
+    "img-alt":                {"criterion": "1.1.1", "level": "A",  "title": "Non-text Content"},
+    "input-label":            {"criterion": "1.3.1", "level": "A",  "title": "Info and Relationships"},
+    "button-content":         {"criterion": "4.1.2", "level": "A",  "title": "Name, Role, Value"},
+    "link-href":              {"criterion": "2.4.4", "level": "A",  "title": "Link Purpose (In Context)"},
+    "heading-order":          {"criterion": "1.3.1", "level": "A",  "title": "Info and Relationships"},
+    "aria-hidden-focusable":  {"criterion": "4.1.2", "level": "A",  "title": "Name, Role, Value"},
+    "viewport-zoom-blocked":  {"criterion": "1.4.4", "level": "AA", "title": "Resize Text"},
+}
+
+# Rules that exist in each level but we DON'T implement — surfaced as gaps
+# so consumers know coverage is partial.
+UNIMPLEMENTED_WCAG_RULES_AA = [
+    {"criterion": "1.4.3", "level": "AA",  "title": "Contrast (Minimum)"},
+    {"criterion": "2.4.7", "level": "AA",  "title": "Focus Visible"},
+    {"criterion": "2.1.2", "level": "A",   "title": "No Keyboard Trap"},
+    {"criterion": "2.3.3", "level": "AAA", "title": "Animation from Interactions"},
+    {"criterion": "3.1.1", "level": "A",   "title": "Language of Page"},
+    {"criterion": "1.4.1", "level": "A",   "title": "Use of Color"},
+    {"criterion": "1.3.5", "level": "AA",  "title": "Identify Input Purpose"},
+    {"criterion": "3.3.1", "level": "A",   "title": "Error Identification"},
+    {"criterion": "3.3.2", "level": "A",   "title": "Labels or Instructions"},
+    {"criterion": "2.5.3", "level": "A",   "title": "Label in Name"},
+    {"criterion": "2.5.2", "level": "A",   "title": "Pointer Cancellation"},
+    {"criterion": "4.1.3", "level": "AA",  "title": "Status Messages"},
+]
+
+
+def _stamp_rule(rule: str) -> str:
+    """Return the actual WCAG level the rule enforces — not the caller's request."""
+    info = IMPLEMENTED_WCAG_RULES.get(rule)
+    if not info:
+        return "WCAG2A"
+    level = info["level"]
+    return "WCAG2A" if level == "A" else ("WCAG2AA" if level == "AA" else "WCAG2AAA")
 
 
 def story_accessibility(
     project_path: str,
     standards: str = "WCAG2AA",
 ) -> Dict[str, Any]:
-    """Run accessibility checks by scanning HTML/JSX/TSX for common issues."""
+    """Run accessibility checks by scanning HTML/JSX/TSX for common issues.
+
+    LED-1010: issues are now stamped with the ACTUAL WCAG level the rule
+    enforces (not the caller's requested level). `standard_requested`,
+    `implemented_rules`, `unimplemented_rules`, and `coverage_percent`
+    surface exactly what ran vs what's still in the standard, so a caller
+    asking for WCAG2AA does not see a false-confident pass.
+    """
     root = Path(project_path)
     if not root.is_dir():
         return {"tool": "story.accessibility", "error": f"Directory not found: {root}"}
@@ -936,21 +1371,21 @@ def story_accessibility(
         files_checked += 1
         rel = str(f.relative_to(root)) if f.is_relative_to(root) else str(f)
 
-        # Missing alt on images
+        # Missing alt on images (WCAG 1.1.1, Level A)
         for m in _IMG_NO_ALT_RE.finditer(text):
             issues.append({
                 "rule": "img-alt",
                 "severity": "error",
                 "message": "Image missing alt attribute",
                 "file": rel,
-                "standard": "WCAG2A",
+                "standard": _stamp_rule("img-alt"),
+                "wcag": IMPLEMENTED_WCAG_RULES["img-alt"],
                 "snippet": m.group()[:120],
             })
 
-        # Inputs without labels
+        # Inputs without labels (WCAG 1.3.1, Level A)
         for m in _INPUT_NO_LABEL_RE.finditer(text):
             snippet = m.group()
-            # Skip hidden inputs
             if 'type="hidden"' in snippet or "type='hidden'" in snippet:
                 continue
             issues.append({
@@ -958,33 +1393,37 @@ def story_accessibility(
                 "severity": "error",
                 "message": "Input missing associated label or aria-label",
                 "file": rel,
-                "standard": "WCAG2A",
+                "standard": _stamp_rule("input-label"),
+                "wcag": IMPLEMENTED_WCAG_RULES["input-label"],
                 "snippet": snippet[:120],
             })
 
-        # Empty buttons
+        # Empty buttons (WCAG 4.1.2, Level A)
         for m in _BUTTON_EMPTY_RE.finditer(text):
             issues.append({
                 "rule": "button-content",
                 "severity": "error",
                 "message": "Button has no text content or aria-label",
                 "file": rel,
-                "standard": "WCAG2A",
+                "standard": _stamp_rule("button-content"),
+                "wcag": IMPLEMENTED_WCAG_RULES["button-content"],
                 "snippet": m.group()[:120],
             })
 
-        # Links without href
+        # Links without href (WCAG 2.4.4, Level A) — regex fixed to not
+        # false-match PascalCase JSX components (`<ArrowLeft />` etc).
         for m in _A_NO_HREF_RE.finditer(text):
             issues.append({
                 "rule": "link-href",
                 "severity": "warning",
                 "message": "Anchor element missing href attribute",
                 "file": rel,
-                "standard": "WCAG2A",
+                "standard": _stamp_rule("link-href"),
+                "wcag": IMPLEMENTED_WCAG_RULES["link-href"],
                 "snippet": m.group()[:120],
             })
 
-        # Heading level skips (e.g., h1 -> h3 without h2)
+        # Heading level skips (WCAG 1.3.1, Level A)
         headings = [int(h) for h in _HEADING_SKIP_RE.findall(text)]
         for i in range(1, len(headings)):
             if headings[i] > headings[i - 1] + 1:
@@ -993,21 +1432,23 @@ def story_accessibility(
                     "severity": "warning",
                     "message": f"Heading level skipped: h{headings[i-1]} to h{headings[i]}",
                     "file": rel,
-                    "standard": "WCAG2A",
+                    "standard": _stamp_rule("heading-order"),
+                    "wcag": IMPLEMENTED_WCAG_RULES["heading-order"],
                 })
 
-        # aria-hidden on focusable elements
+        # aria-hidden on focusable elements (WCAG 4.1.2, Level A)
         for m in _ARIA_HIDDEN_FOCUSABLE_RE.finditer(text):
             issues.append({
                 "rule": "aria-hidden-focusable",
                 "severity": "error",
                 "message": "Focusable element has aria-hidden='true'",
                 "file": rel,
-                "standard": "WCAG2AA",
+                "standard": _stamp_rule("aria-hidden-focusable"),
+                "wcag": IMPLEMENTED_WCAG_RULES["aria-hidden-focusable"],
                 "snippet": m.group()[:120],
             })
 
-    # Filter by standard level if needed
+    # Filter by requested standard level
     standard_levels = {"WCAG2A": 1, "WCAG2AA": 2, "WCAG2AAA": 3}
     requested_level = standard_levels.get(standards, 2)
     filtered = [i for i in issues if standard_levels.get(i.get("standard", "WCAG2A"), 1) <= requested_level]
@@ -1015,11 +1456,50 @@ def story_accessibility(
     errors = [i for i in filtered if i["severity"] == "error"]
     warnings = [i for i in filtered if i["severity"] == "warning"]
 
+    # LED-1010: group by (rule, file) so 77 input-label errors across 30+
+    # files can be triaged as ~30 groups with counts rather than 77 individual
+    # call-sites in the caller's inbox.
+    groups: Dict[tuple, Dict[str, Any]] = {}
+    for issue in filtered:
+        key = (issue["rule"], issue.get("file", ""))
+        if key not in groups:
+            groups[key] = {
+                "rule": issue["rule"],
+                "file": issue.get("file", ""),
+                "count": 0,
+                "severity": issue["severity"],
+                "standard": issue.get("standard", "WCAG2A"),
+            }
+        groups[key]["count"] += 1
+
+    # LED-1010 coverage: we implement ~7 rules; WCAG2AA covers many more.
+    # Count rules at/below the requested level to be honest about coverage.
+    implemented_at_level = [
+        r for r, info in IMPLEMENTED_WCAG_RULES.items()
+        if standard_levels.get("WCAG2" + info["level"], 1) <= requested_level
+    ]
+    unimplemented_at_level = [
+        r for r in UNIMPLEMENTED_WCAG_RULES_AA
+        if standard_levels.get("WCAG2" + r["level"], 1) <= requested_level
+    ]
+    total_rules = max(1, len(implemented_at_level) + len(unimplemented_at_level))
+    coverage_pct = len(implemented_at_level) * 100 // total_rules
+
+    # Status: partial_coverage when coverage < 100%. A `status: ok` on a scan
+    # that ran 7 of ~50 WCAG2AA rules is exactly the silent-false-confidence
+    # failure mode LED-1010 flagged.
+    status = STATUS_PARTIAL_COVERAGE if coverage_pct < 100 else STATUS_OK
+
     return {
         "tool": "story.accessibility",
-        "status": "ok",
-        "standard": standards,
+        "status": status,
+        "standard_requested": standards,
+        "standard": standards,  # retained for back-compat
+        "implemented_rules": implemented_at_level,
+        "unimplemented_rules": unimplemented_at_level,
+        "coverage_percent": coverage_pct,
         "issues": filtered,
+        "groups": sorted(groups.values(), key=lambda g: (-g["count"], g["file"])),
         "passed_count": files_checked - len(set(i["file"] for i in errors)),
         "failed_count": len(set(i["file"] for i in errors)),
         "error_count": len(errors),
