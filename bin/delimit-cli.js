@@ -11,6 +11,7 @@ const inquirer = require('inquirer');
 const DelimitAuthSetup = require('../lib/auth-setup');
 const DelimitHooksInstaller = require('../lib/hooks-installer');
 const crossModelHooks = require('../lib/cross-model-hooks');
+const { delimitHome, homeSubpath } = require('../lib/delimit-home');
 const {
     resolveContinuityContext,
     formatContinuityReport,
@@ -58,8 +59,8 @@ function normalizeNaturalLanguageArgs(argv) {
     const raw = argv.slice(2);
     if (raw.length === 0) {
         // First-run detection: if no ~/.delimit exists, show welcome flow
-        const delimitHome = path.join(os.homedir(), '.delimit');
-        if (!fs.existsSync(delimitHome) || !fs.existsSync(path.join(delimitHome, 'server'))) {
+        const home = delimitHome();
+        if (!fs.existsSync(home) || !fs.existsSync(path.join(home, 'server'))) {
             return ['scan'];  // lowest friction entry point for new users
         }
         return resolveRepoRoot(process.cwd()) ? ['session', '--inspect'] : ['session', '--all'];
@@ -1093,8 +1094,7 @@ program
     .option('--dry-run', 'Preview what would be removed without making changes')
     .action(async (options) => {
         const dryRun = options.dryRun;
-        const HOME = process.env.HOME;
-        const backupDir = path.join(HOME, '.delimit', 'backups', `uninstall-${Date.now()}`);
+        const backupDir = homeSubpath('backups', `uninstall-${Date.now()}`);
         const changes = [];
 
         if (dryRun) {
@@ -1349,8 +1349,7 @@ program
 
 // Helper function for installation
 async function installDelimit(mode, scope, hooksType = 'all') {
-    const HOME = process.env.HOME;
-    const DELIMIT_HOME = path.join(HOME, '.delimit');
+    const DELIMIT_HOME = delimitHome();
     
     // Create directories
     ['bin', 'hooks', 'shims', 'config', 'audit', 'credentials'].forEach(dir => {
@@ -2554,7 +2553,7 @@ program
     .action(async () => {
         console.log(chalk.bold('\n  Delimit — Resume Work\n'));
 
-        const DELIMIT_HOME = path.join(os.homedir(), '.delimit');
+        const DELIMIT_HOME = delimitHome();
 
         // 1. Last session handoff
         const sessionsDir = path.join(DELIMIT_HOME, 'sessions');
@@ -3285,10 +3284,10 @@ program
     .option('--format <fmt>', 'Output format: md, json, html', 'md')
     .option('--output <file>', 'Write report to file instead of stdout')
     .action(async (options) => {
-        const delimitHome = path.join(os.homedir(), '.delimit');
-        const evidenceDir = path.join(delimitHome, 'evidence');
-        const ledgerDir = path.join(delimitHome, 'ledger');
-        const memoryDir = path.join(delimitHome, 'memory');
+        const home = delimitHome();
+        const evidenceDir = path.join(home, 'evidence');
+        const ledgerDir = path.join(home, 'ledger');
+        const memoryDir = path.join(home, 'memory');
 
         // Parse duration into milliseconds
         function parseDuration(dur) {
@@ -4906,6 +4905,86 @@ program
         }
     });
 
+// STR-656 — `delimit attest mcp` local-preview command (no public attestation,
+// no badge, no publish). Per the methodology gate (STR-657) the public signed-
+// attestation surface is locked until: 30d methodology visibility +
+// 14d CLI shipped + 5+ merge-gate pilot reference accounts + incident-
+// response process documented. This command exists so maintainers can
+// run the methodology checks locally and see the preview report shape.
+program
+    .command('attest <kind>')
+    .description('Run a Delimit attestation methodology check locally (preview only).  kind: mcp')
+    .option('--path <dir>', 'Path to repo (default: cwd)')
+    .option('--json', 'Emit machine-readable JSON instead of the text preview')
+    .option('--output <file>', 'Write the preview JSON to a file (default: .delimit/attestation-preview.json)')
+    .option('--write <file>', '(deprecated) alias for --output')
+    .option('--no-write', 'Do not write the preview JSON to disk')
+    .action(async (kind, opts) => {
+        const { recordTelemetry } = require('../lib/attest-telemetry');
+        if (kind !== 'mcp') {
+            console.log(chalk.yellow(`  Unknown attestation kind: ${kind}`));
+            console.log(chalk.gray('  Supported kinds (v1): mcp'));
+            console.log(chalk.gray('  pr-review and release attestations land in a follow-up.'));
+            recordTelemetry({ kind, outcome: 'unknown_kind' });
+            process.exitCode = 2;
+            return;
+        }
+        const { runAttestMcp, renderPreview } = require('../lib/attest-mcp');
+        let report;
+        try {
+            report = await runAttestMcp({ path: opts.path });
+        } catch (e) {
+            console.log(chalk.red(`  attest mcp crashed: ${e.message}`));
+            recordTelemetry({ kind: 'mcp', outcome: 'runner_crash', error: e.message });
+            process.exitCode = 2;
+            return;
+        }
+        if (report.error) {
+            console.log(chalk.red(`  ${report.error}`));
+            recordTelemetry({ kind: 'mcp', outcome: 'runner_error', error: report.error });
+            process.exitCode = 2;
+            return;
+        }
+        if (opts.json) {
+            console.log(JSON.stringify(report, null, 2));
+        } else {
+            console.log(renderPreview(report));
+        }
+        // Write the JSON report unless --no-write was given. --output wins,
+        // --write is the deprecated alias kept for ≥1 minor cycle.
+        if (opts.write !== false) {
+            const outPath = opts.output || opts.write ||
+                path.join(report.repo.path, '.delimit', 'attestation-preview.json');
+            try {
+                fs.mkdirSync(path.dirname(outPath), { recursive: true });
+                fs.writeFileSync(outPath, JSON.stringify(report, null, 2) + '\n');
+                if (!opts.json) console.log(chalk.gray(`  Preview JSON: ${outPath}\n`));
+            } catch (e) {
+                // Soft-fail: a read-only filesystem (EROFS) or permissions
+                // issue must NOT elevate the exit code — the report itself
+                // is on stdout already.
+                if (!opts.json) {
+                    console.log(chalk.yellow(`  could not write preview JSON (${e.code || 'IO'}): ${e.message}`));
+                }
+            }
+        }
+        // 3-tier exit codes (panel verdict on STR-656 scaffold review):
+        //   0 — pass + skip (no policy failure, no tool error)
+        //   1 — at least one check returned fail (policy violation)
+        //   2 — at least one check returned error (tool unavailable / unreadable input)
+        // Skips do NOT raise the exit code; they are evidence states, not failures.
+        const anyFail = report.checks.some((c) => c.status === 'fail');
+        const anyError = report.checks.some((c) => c.status === 'error');
+        const exitCode = anyFail ? 1 : (anyError ? 2 : 0);
+        recordTelemetry({
+            kind: 'mcp',
+            outcome: ['pass', 'fail', 'error'][exitCode],
+            methodology_version: report.methodology_version,
+            check_summary: report.checks.map((c) => `${c.id}:${c.status}`).join(','),
+        });
+        process.exitCode = exitCode;
+    });
+
 // CI command — generate GitHub Action workflow
 program
     .command('ci')
@@ -5477,8 +5556,7 @@ program
     .command('activate <key>')
     .description('Activate a Delimit Pro license key')
     .action(async (key) => {
-        const os = require('os');
-        const licenseDir = path.join(os.homedir(), '.delimit');
+        const licenseDir = delimitHome();
         const licensePath = path.join(licenseDir, 'license.json');
 
         if (!key || key.length < 10) {
@@ -5766,8 +5844,7 @@ program
             console.log(`Question: ${chalk.bold(question)}\n`);
 
             // Try to run deliberation directly via the gateway
-            const HOME = process.env.HOME || require('os').homedir();
-            const gatewayScript = path.join(HOME, '.delimit', 'server', 'ai', 'deliberation.py');
+            const gatewayScript = homeSubpath('server', 'ai', 'deliberation.py');
             const scriptPath = fs.existsSync(gatewayScript) ? gatewayScript : null;
 
             if (scriptPath) {
@@ -5809,7 +5886,7 @@ if result.get('summary'):
             }
 
             // Save pending deliberation to file for reference
-            const deliberationDir = path.join(HOME, '.delimit', 'deliberation');
+            const deliberationDir = homeSubpath('deliberation');
             fs.mkdirSync(deliberationDir, { recursive: true });
             const pending = {
                 question,
@@ -5848,8 +5925,8 @@ if result.get('summary'):
 // Models command: BYOK deliberation key management wizard
 // ---------------------------------------------------------------------------
 
-const MODELS_CONFIG_PATH = path.join(os.homedir(), '.delimit', 'models.json');
-const DELIBERATION_USAGE_PATH = path.join(os.homedir(), '.delimit', 'deliberation_usage.json');
+const MODELS_CONFIG_PATH = homeSubpath('models.json');
+const DELIBERATION_USAGE_PATH = homeSubpath('deliberation_usage.json');
 
 const DEFAULT_MODELS = {
     grok: { enabled: false, api_key: '', model: 'grok-4-0709', name: 'Grok 4' },
@@ -6199,7 +6276,7 @@ program
 program
     .command('trust-page')
     .description('Render attestations into a public trust page (static HTML + JSON feed)')
-    .option('-d, --dir <path>', 'Attestation directory', path.join(os.homedir(), '.delimit', 'attestations'))
+    .option('-d, --dir <path>', 'Attestation directory', homeSubpath('attestations'))
     .option('-o, --out <path>', 'Output directory', './trust-page')
     .option('-t, --title <title>', 'Trust page title', 'Trust Page')
     .option('--json', 'Output result as JSON', false)
@@ -6229,7 +6306,7 @@ program
 program
     .command('ai-sbom')
     .description('Build a CycloneDX-AI bill of materials from attestations')
-    .option('-d, --dir <path>', 'Attestation directory', path.join(os.homedir(), '.delimit', 'attestations'))
+    .option('-d, --dir <path>', 'Attestation directory', homeSubpath('attestations'))
     .option('-o, --out <path>', 'Output file', './ai-sbom.json')
     .option('-n, --name <name>', 'BOM subject name', 'ai-sbom')
     .option('-v, --package-version <v>', 'BOM subject version', '1.0.0')
@@ -6292,7 +6369,7 @@ program
             console.log("\nUse " + chalk.cyan("delimit vault list") + " to see configured secrets.");
         } else if (action === "list") {
             console.log(chalk.bold("Configured Secrets:"));
-            const secretsDir = path.join(os.homedir(), '.delimit', 'secrets');
+            const secretsDir = homeSubpath('secrets');
             if (fs.existsSync(secretsDir)) {
                 const files = fs.readdirSync(secretsDir).filter(f => f.endsWith('.json') && !f.startsWith('.'));
                 if (files.length === 0) {
@@ -6314,7 +6391,7 @@ program
                 console.log(chalk.dim("  Example: delimit vault set OPENAI_API_KEY"));
                 process.exit(1);
             }
-            const secretsDir = path.join(os.homedir(), '.delimit', 'secrets');
+            const secretsDir = homeSubpath('secrets');
             fs.mkdirSync(secretsDir, { recursive: true });
             const filePath = path.join(secretsDir, `${name}.json`);
             const existing = fs.existsSync(filePath);
@@ -6338,7 +6415,7 @@ program
                 console.log(chalk.red("Usage: delimit vault reveal <NAME>"));
                 process.exit(1);
             }
-            const secretsDir = path.join(os.homedir(), '.delimit', 'secrets');
+            const secretsDir = homeSubpath('secrets');
             const filePath = path.join(secretsDir, `${name}.json`);
             if (!fs.existsSync(filePath)) {
                 console.log(chalk.red(`  Secret "${name}" not found.`));
@@ -6399,7 +6476,7 @@ program
 // Memory commands: remember, recall, forget
 // ---------------------------------------------------------------------------
 
-const MEMORY_DIR = path.join(os.homedir(), '.delimit', 'memory');
+const MEMORY_DIR = homeSubpath('memory');
 const MEMORY_FILE = path.join(MEMORY_DIR, 'memories.jsonl');
 
 const KNOWN_TECH_TERMS = new Set([
